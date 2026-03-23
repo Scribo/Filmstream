@@ -62,7 +62,7 @@ class DLHDExtractor:
 
         # ✅ Lista host iframe (caricata da cache o vuota)
         cached_hosts = cache_data.get("hosts", [])
-        self.iframe_hosts = cached_hosts if cached_hosts else ["dlhd.so", "dlhd.dad", "daddyhd.com"]
+        self.iframe_hosts = cached_hosts if cached_hosts else ["dlhd.so", "dlhd.dad", "daddyhd.com", "dlhd.sx", "dlstreams.top"]
 
         # ✅ Configurazione server dinamica dal worker (usando TEMPLATE completi)
         # Tutti i valori provengono dal worker, i fallback sono solo per il primo avvio
@@ -984,7 +984,16 @@ class DLHDExtractor:
                             channel_id, self.iframe_hosts
                         )
                     else:
-                        raise
+                        logger.warning("⚠️ Failed to update host list from worker. Trying emergency fallback hosts...")
+                        fallback_hosts = ["dlhd.so", "dlhd.dad", "daddyhd.com", "dlhd.sx", "dlstreams.top"]
+                        untested_hosts = [h for h in fallback_hosts if h not in self.iframe_hosts]
+
+                        if untested_hosts:
+                            result = await self.get_stream_data_direct(
+                                channel_id, untested_hosts
+                            )
+                        else:
+                            raise
 
                 # Salva in cache
                 result["_source"] = "standard"
