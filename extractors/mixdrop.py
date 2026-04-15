@@ -38,17 +38,53 @@ class MixdropExtractor:
 
     async def extract(self, url: str, **kwargs) -> dict:
         """Extract Mixdrop URL."""
-        # Normalize URL to .ps domain and remove trailing segments
-        if "club" in url:
-            url = url.replace("club", "ps").split("/2")[0]
-        elif "ag" in url:
-            url = url.replace("ag", "ps").split("/2")[0]
-        elif any(domain in url for domain in ["mdy48tn97.com", "mixdrop.to", "mixdrop.co", "m1xdrop.net"]):
-            # Handle alternative domains
-            for domain in ["mdy48tn97.com", "mixdrop.to", "mixdrop.co", "m1xdrop.net"]:
-                if domain in url:
-                    url = url.replace(domain, "mixdrop.ps").split("/2")[0]
-                    break
+        session = await self._get_session()
+        
+        # Handle wrappers like stayonline.pro
+        if "stayonline.pro" in url:
+            try:
+                link_id = url.rstrip("/").split("/")[-1]
+                async with session.post(
+                    "https://stayonline.pro/ajax/linkView.php",
+                    data={"id": link_id},
+                    headers={
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Referer": url,
+                        "User-Agent": self.base_headers["user-agent"]
+                    }
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("status") == "success":
+                        new_url = data["data"]["value"]
+                        logger.info(f"Resolved stayonline.pro wrapper: {url} -> {new_url}")
+                        url = new_url
+                    else:
+                        logger.warning(f"Failed to resolve stayonline.pro wrapper: {data.get('message')}")
+            except Exception as e:
+                logger.error(f"Error resolving stayonline.pro wrapper: {e}")
+
+        # Normalize URL and ensure it's an embed URL if possible
+        # Mixdrop mirrors: .co, .to, .ps, .ch, .ag, .gl, .club, .net, .top, .nz
+        if "/f/" in url:
+            url = url.replace("/f/", "/e/")
+        
+        # Keep original domain if it's a known mirror, otherwise default to .ps
+        known_mirrors = ["mixdrop.co", "mixdrop.to", "mixdrop.ps", "mixdrop.ch", "mixdrop.ag", 
+                         "mixdrop.gl", "mixdrop.club", "m1xdrop.net", "mixdrop.top", "mixdrop.nz",
+                         "mdy48tn97.com"]
+        
+        mirror_found = False
+        for mirror in known_mirrors:
+            if mirror in url:
+                mirror_found = True
+                break
+        
+        if not mirror_found and "mixdrop" in url:
+            # Try to force a known good mirror
+            parts = url.split("/")
+            if len(parts) > 2:
+                parts[2] = "mixdrop.ps"
+                url = "/".join(parts)
 
         headers = {"accept-language": "en-US,en;q=0.5", "referer": url}
         

@@ -212,6 +212,11 @@ GLOBAL_PROXY=http://user:pass@myproxy.com:8080
 
 TRANSPORT_ROUTES={URL=vavoo.to, PROXY=socks5://proxy1:1080, DISABLE_SSL=true}
 
+# --- Specific Note for MaxStream / Uprot ---
+# Providers like MaxStream and Uprot.net aggressively block Datacenter IPs (AWS, Oracle, etc.).
+# To make them work on a cloud server, use a residential proxy ONLY for these domains:
+TRANSPORT_ROUTES={URL=uprot.net, PROXY=http://user:pass@res-proxy:port},{URL=maxstream.video, PROXY=http://user:pass@res-proxy:port},{URL=host-cdn.net, PROXY=http://user:pass@res-proxy:port}
+
 # Password to protect the APIs
 API_PASSWORD=mysecretpassword
 
@@ -272,37 +277,42 @@ This endpoint **cannot be opened directly** without parameters. It is used to ex
 If you open `/extractor` or `/extractor/video` without parameters, you will receive a JSON response with instructions and a list of supported hosts.
 
 **How to use:**
-You must add `?url=` (or `?d=`) followed by the video link you want to process.
+You must add `?d=` (or `?url=`) followed by the video link you want to process.
 
 **Practical Examples:**
 
 1.  **Get JSON with details (Default):**
     ```
-    http://your-server:7860/extractor/video?url=https://vavoo.to/channel/123
+    http://your-server:7860/extractor/video?d=https://vavoo.to/channel/123
     ```
     *Returns a JSON with `destination_url`, `request_headers`, etc.*
 
 2.  **Redirect directly to stream (Redirect):**
     Add `&redirect_stream=true`. Useful for putting the link directly into a player.
     ```
-    http://your-server:7860/extractor/video?url=https://vavoo.to/channel/123&redirect_stream=true
+    http://your-server:7860/extractor/video?d=https://vavoo.to/channel/123&redirect_stream=true
     ```
     *The server will respond with a 302 redirect to the proxy URL ready for playback.*
 
 3.  **Manually specify the host (Bypass Auto-detect):**
     If auto-detection fails, you can force the use of a specific extractor with `host=`.
     ```
-    http://your-server:7860/extractor/video?host=vavoo&url=https://custom-link.com/123
+    http://your-server:7860/extractor/video.m3u8?host=vavoo&d=https://custom-link.com/123
+    ```
+
+3b. **Direct MP4 host example (Mixdrop):**
+    ```
+    http://your-server:7860/extractor/video.mp4?host=mixdrop&d=https://mixdrop.co/e/ABC123XYZ
     ```
 
 4.  **Base64 URL:**
-    You can pass the Base64 encoded URL in the `url` (or `d`) parameter. The server will automatically decode it.
+    You can pass the Base64 encoded URL in the `d` (or `url`) parameter. The server will automatically decode it.
     ```
-    http://your-server:7860/extractor/video?url=aHR0cHM6Ly9leGFtcGxlLmNvbS92aWRlbw==
+    http://your-server:7860/extractor/video?d=aHR0cHM6Ly9leGFtcGxlLmNvbS92aWRlbw==
     ```
 
 **Parameters:**
-- `url` (or `d`): **(Required)** The original URL of the video or page. Supports plain text, URL Encoded, or **Base64 Encoded** links.
+- `d` (or `url`): **(Required)** The original URL of the video or page. Supports plain text, URL Encoded, or **Base64 Encoded** links.
 - `host`: (Optional) Forces the use of a specific extractor (e.g., `vavoo`, `mixdrop`, `voe`, `streamtape`, `orion`).
 - `redirect_stream`: 
   - `true`: Immediate redirect to the playable stream.
