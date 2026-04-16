@@ -215,7 +215,7 @@ TRANSPORT_ROUTES={URL=vavoo.to, PROXY=socks5://proxy1:1080, DISABLE_SSL=true}
 # --- Specific Note for MaxStream / Uprot ---
 # Providers like MaxStream and Uprot.net aggressively block Datacenter IPs (AWS, Oracle, etc.).
 # To make them work on a cloud server, use a residential proxy ONLY for these domains:
-TRANSPORT_ROUTES={URL=uprot.net, PROXY=http://user:pass@res-proxy:port},{URL=maxstream.video, PROXY=http://user:pass@res-proxy:port},{URL=host-cdn.net, PROXY=http://user:pass@res-proxy:port}
+TRANSPORT_ROUTES={URL=uprot.net, PROXY=http://user:pass@res-proxy:port},{URL=maxstream.video, PROXY=http://user:pass@res-proxy:port}
 
 # Password to protect the APIs
 API_PASSWORD=mysecretpassword

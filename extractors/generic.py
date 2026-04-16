@@ -3,6 +3,7 @@ import logging
 import ssl
 import urllib.parse
 from urllib.parse import urlparse
+import yarl
 from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from aiohttp_socks import ProxyConnector
 
@@ -75,9 +76,21 @@ class GenericHLSExtractor:
                 has_origin = True
                 headers["origin"] = v # Usa quello passato
 
-        if not has_referer:
-            headers["referer"] = f"{origin}/"
-        if not has_origin:
+        parsed = urlparse(url)
+        referer = kwargs.get('h_Referer', kwargs.get('h_referer'))
+        
+        # ✅ CinemaCity CDN Fix: No Referer/Origin if missing for cccdn.net
+        if not referer and "cccdn.net" not in parsed.netloc:
+            referer = f"{parsed.scheme}://{parsed.netloc}/"
+            
+        origin = kwargs.get('h_Origin', kwargs.get('h_origin'))
+        if not origin and "cccdn.net" not in parsed.netloc:
+            origin = f"{parsed.scheme}://{parsed.netloc}"
+
+        if not has_referer and referer:
+            headers["referer"] = referer
+        
+        if not has_origin and origin:
             headers["origin"] = origin
 
         # Applica altri header passati dal proxy (h_ params)
@@ -94,7 +107,13 @@ class GenericHLSExtractor:
                 continue # Già gestiti sopra
 
             # Filtra e aggiunge solo gli header necessari/sicuri
-            if h_lower in ["authorization", "x-api-key", "x-auth-token", "cookie", "x-channel-key", "accept"]:
+            if h_lower in [
+                "authorization", "x-api-key", "x-auth-token", "cookie", "x-channel-key", 
+                "accept", "accept-language", "accept-encoding", "dnt", "upgrade-insecure-requests",
+                "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user",
+                "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+                "pragma", "cache-control", "priority"
+            ]:
                 # Sovrascrive garantendo che non ci siano duplicati grazie alla chiave minuscola
                 headers[h_lower] = v
             
@@ -102,8 +121,20 @@ class GenericHLSExtractor:
             if h_lower in ["x-forwarded-for", "x-real-ip", "forwarded", "via", "host"]:
                 continue
 
+        # Clean cookie cleanup - ensure trailing semicolon
+        if "cookie" in headers:
+            headers["cookie"] = headers["cookie"].strip()
+            if not headers["cookie"].endswith(';'):
+                headers["cookie"] += ';'
+
+        # Add browser-like headers for CDN bypass
+        if "accept-language" not in headers:
+            headers["accept-language"] = "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7,it;q=0.6,fr;q=0.5"
+        if "accept-encoding" not in headers:
+            headers["accept-encoding"] = "gzip, deflate, br, zstd"
+
         return {
-            "destination_url": url, 
+            "destination_url": str(yarl.URL(url, encoded=True)), 
             "request_headers": headers, 
             "mediaflow_endpoint": "hls_proxy"
         }

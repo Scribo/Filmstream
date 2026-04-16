@@ -8,6 +8,7 @@ from aiohttp import ClientSession, ClientTimeout, TCPConnector
 from aiohttp.resolver import DefaultResolver
 from aiohttp_socks import ProxyConnector
 from bs4 import BeautifulSoup
+from config import GLOBAL_PROXIES, TRANSPORT_ROUTES, get_proxy_for_url
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,20 @@ class MaxstreamExtractor:
     def _get_random_proxy(self):
         return random.choice(self.proxies) if self.proxies else None
 
+    def _get_proxies_for_url(self, url: str) -> list[str]:
+        """Build ordered proxy list for current URL, honoring TRANSPORT_ROUTES first."""
+        ordered = []
+
+        route_proxy = get_proxy_for_url(url, TRANSPORT_ROUTES, GLOBAL_PROXIES)
+        if route_proxy:
+            ordered.append(route_proxy)
+
+        for proxy in self.proxies:
+            if proxy and proxy not in ordered:
+                ordered.append(proxy)
+
+        return ordered
+
     async def _get_session(self, proxy=None):
         """Get or create session, optionally with a specific proxy."""
         # Note: we use our custom resolver only for non-proxy requests
@@ -114,9 +129,10 @@ class MaxstreamExtractor:
         # Path 1: Direct (system DNS)
         paths.append({"proxy": None, "use_ip": None})
         
-        # Path 2: Proxies (if any)
-        if self.proxies:
-            for p in self.proxies:
+        # Path 2: Proxies (route-specific first)
+        proxies_for_url = self._get_proxies_for_url(url)
+        if proxies_for_url:
+            for p in proxies_for_url:
                 paths.append({"proxy": p, "use_ip": None})
         
         # Path 3: DoH fallback (override resolver) if it's uprot or maxstream

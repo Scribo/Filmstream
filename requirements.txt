@@ -11,3 +11,4 @@ pydash2hls
 playwright
 ddddocr
 Pillow
+curl_cffi

@@ -26,6 +26,13 @@ from aiohttp import (
 )
 from aiohttp_socks import ProxyConnector
 
+try:
+    from curl_cffi.requests import AsyncSession as CurlAsyncSession
+    HAS_CURL_CFFI = True
+except ImportError:
+    HAS_CURL_CFFI = False
+    CurlAsyncSession = None
+
 from config import (
     GLOBAL_PROXIES,
     TRANSPORT_ROUTES,
@@ -90,6 +97,8 @@ if MPD_MODE == "legacy":
     F16PxExtractor,
 ) = None, None, None, None, None
 StreamHGExtractor = None
+CinemaCityExtractor = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -122,198 +131,172 @@ def _resolve_sportsonline_proxy(url: str) -> str | None:
 # Importazione condizionale degli estrattori
 try:
     from extractors.freeshot import FreeshotExtractor
-
     logger.info("✅ FreeshotExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ FreeshotExtractor module not found.")
 
 try:
     from extractors.vavoo import VavooExtractor
-
     logger.info("✅ VavooExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ VavooExtractor module not found. Vavoo functionality disabled.")
 
-
 try:
     from routes.playlist_builder import PlaylistBuilder
-
     logger.info("✅ PlaylistBuilder module loaded.")
 except ImportError:
-    logger.warning(
-        "⚠️ PlaylistBuilder module not found. PlaylistBuilder functionality disabled."
-    )
+    logger.warning("⚠️ PlaylistBuilder module not found. PlaylistBuilder functionality disabled.")
 
 try:
     from extractors.vixsrc import VixSrcExtractor
-
     logger.info("✅ VixSrcExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ VixSrcExtractor module not found. VixSrc functionality disabled.")
 
 try:
     from extractors.sportsonline import SportsonlineExtractor
-
     logger.info("✅ SportsonlineExtractor module loaded.")
 except ImportError:
-    logger.warning(
-        "⚠️ SportsonlineExtractor module not found. Sportsonline functionality disabled."
-    )
+    logger.warning("⚠️ SportsonlineExtractor module not found. Sportsonline functionality disabled.")
 
 try:
     from extractors.mixdrop import MixdropExtractor
-
     logger.info("✅ MixdropExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ MixdropExtractor module not found.")
 
 try:
     from extractors.voe import VoeExtractor
-
     logger.info("✅ VoeExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ VoeExtractor module not found.")
 
 try:
     from extractors.streamtape import StreamtapeExtractor
-
     logger.info("✅ StreamtapeExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ StreamtapeExtractor module not found.")
 
 try:
     from extractors.orion import OrionExtractor
-
     logger.info("✅ OrionExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ OrionExtractor module not found.")
 
-# --- New Extractors ---
 try:
     from extractors.doodstream import DoodStreamExtractor
-
     logger.info("✅ DoodStreamExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ DoodStreamExtractor module not found.")
 
 try:
     from extractors.fastream import FastreamExtractor
-
     logger.info("✅ FastreamExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ FastreamExtractor module not found.")
 
 try:
     from extractors.filelions import FileLionsExtractor
-
     logger.info("✅ FileLionsExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ FileLionsExtractor module not found.")
 
 try:
     from extractors.filemoon import FileMoonExtractor
-
     logger.info("✅ FileMoonExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ FileMoonExtractor module not found.")
 
 try:
     from extractors.lulustream import LuluStreamExtractor
-
     logger.info("✅ LuluStreamExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ LuluStreamExtractor module not found.")
 
 try:
     from extractors.maxstream import MaxstreamExtractor
-
     logger.info("✅ MaxstreamExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ MaxstreamExtractor module not found.")
 
 try:
     from extractors.okru import OkruExtractor
-
     logger.info("✅ OkruExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ OkruExtractor module not found.")
 
 try:
     from extractors.streamwish import StreamWishExtractor
-
     logger.info("✅ StreamWishExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ StreamWishExtractor module not found.")
 
 try:
     from extractors.streamhg import StreamHGExtractor
-
     logger.info("✅ StreamHGExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ StreamHGExtractor module not found.")
 
 try:
     from extractors.supervideo import SupervideoExtractor
-
     logger.info("✅ SupervideoExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ SupervideoExtractor module not found.")
 
 try:
     from extractors.uqload import UqloadExtractor
-
     logger.info("✅ UqloadExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ UqloadExtractor module not found.")
 
 try:
     from extractors.dropload import DroploadExtractor
-
-    logger.info("DroploadExtractor module loaded.")
+    logger.info("✅ DroploadExtractor module loaded.")
 except ImportError:
-    logger.warning("DroploadExtractor module not found.")
+    logger.warning("⚠️ DroploadExtractor module not found.")
 
 try:
     from extractors.vidmoly import VidmolyExtractor
-
     logger.info("✅ VidmolyExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ VidmolyExtractor module not found.")
 
 try:
     from extractors.vidoza import VidozaExtractor
-
     logger.info("✅ VidozaExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ VidozaExtractor module not found.")
 
 try:
     from extractors.turbovidplay import TurboVidPlayExtractor
-
     logger.info("✅ TurboVidPlayExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ TurboVidPlayExtractor module not found.")
 
 try:
     from extractors.livetv import LiveTVExtractor
-
     logger.info("✅ LiveTVExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ LiveTVExtractor module not found.")
 
 try:
     from extractors.f16px import F16PxExtractor
-
     logger.info("✅ F16PxExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ F16PxExtractor module not found.")
 
 try:
     from extractors.dlstreams import DLStreamsExtractor
-
     logger.info("✅ DLStreamsExtractor module loaded.")
 except ImportError:
     logger.warning("⚠️ DLStreamsExtractor module not found.")
+
+try:
+    from extractors.cinemacity import CinemaCityExtractor
+    print("✅ CinemaCityExtractor loaded successfully")
+except Exception as e:
+    print(f"❌ CinemaCityExtractor FAILED to load: {e}")
+    CinemaCityExtractor = None
 
 
 class HLSProxy:
@@ -631,8 +614,15 @@ class HLSProxy:
                     return self.extractors[key]
                 elif host == "maxstream":
                     if key not in self.extractors:
+                        proxy_candidates = []
+                        for candidate in ("uprot.net", "maxstream.video", "maxstream"):
+                            proxy = get_proxy_for_url(
+                                candidate, TRANSPORT_ROUTES, GLOBAL_PROXIES
+                            )
+                            if proxy and proxy not in proxy_candidates:
+                                proxy_candidates.append(proxy)
                         self.extractors[key] = MaxstreamExtractor(
-                            request_headers, proxies=GLOBAL_PROXIES
+                            request_headers, proxies=proxy_candidates
                         )
                     return self.extractors[key]
                 elif host in ["okru", "ok.ru"]:
@@ -704,6 +694,13 @@ class HLSProxy:
                             request_headers, proxies=GLOBAL_PROXIES
                         )
                     return self.extractors[key]
+                elif host in ["city", "cinemacity"]:
+                    key = "cinemacity"
+                    if key not in self.extractors:
+                        self.extractors[key] = CinemaCityExtractor(
+                            request_headers, proxies=GLOBAL_PROXIES
+                        )
+                    return self.extractors[key]
 
             # 2. Auto-detection basata sull'URL
             if "vavoo.to" in url:
@@ -763,6 +760,15 @@ class HLSProxy:
                 proxy_list = [proxy] if proxy else []
                 if key not in self.extractors:
                     self.extractors[key] = StreamHGExtractor(
+                        request_headers, proxies=proxy_list
+                    )
+                return self.extractors[key]
+            elif "cinemacity.cc" in url.lower():
+                key = "cinemacity"
+                proxy = get_proxy_for_url("cinemacity.cc", TRANSPORT_ROUTES, GLOBAL_PROXIES)
+                proxy_list = [proxy] if proxy else []
+                if key not in self.extractors:
+                    self.extractors[key] = CinemaCityExtractor(
                         request_headers, proxies=proxy_list
                     )
                 return self.extractors[key]
@@ -911,8 +917,13 @@ class HLSProxy:
                 return self.extractors[key]
             elif "maxstream" in url or "uprot.net" in url:
                 key = "maxstream"
-                proxy = get_proxy_for_url("maxstream", TRANSPORT_ROUTES, GLOBAL_PROXIES)
-                proxy_list = [proxy] if proxy else []
+                proxy_list = []
+                for candidate in (url, "uprot.net", "maxstream.video", "maxstream"):
+                    proxy = get_proxy_for_url(
+                        candidate, TRANSPORT_ROUTES, GLOBAL_PROXIES
+                    )
+                    if proxy and proxy not in proxy_list:
+                        proxy_list.append(proxy)
                 if key not in self.extractors:
                     self.extractors[key] = MaxstreamExtractor(
                         request_headers, proxies=proxy_list
@@ -2140,11 +2151,47 @@ class HLSProxy:
                 logger.info(
                     f"📡 [Proxy Stream] Using session{f' via proxy {session_proxy}' if session_proxy else ' (direct)'} for: {stream_url}"
                 )
-            async with session.get(
-                stream_url, headers=headers, ssl=not disable_ssl
-            ) as resp:
-                content_type = resp.headers.get("content-type", "")
+            # ✅ TLS FINGERPRINT BYPASS: Use curl_cffi for problematic CDNs (CinemaCity)
+            use_curl_cffi = HAS_CURL_CFFI and "cccdn.net" in stream_url
+            
+            if use_curl_cffi:
+                curl_proxy = f"{request.scheme}://{session_proxy}" if session_proxy else None
+                if curl_proxy and "://" not in curl_proxy: curl_proxy = f"http://{curl_proxy}"
 
+                logger.info(f"🛡️ [Proxy Stream] Using curl_cffi (impersonate=chrome) for: {stream_url}")
+                
+                class CurlContextManager:
+                    def __init__(self, url, headers, proxy):
+                        self.url, self.headers, self.proxy = url, headers, proxy
+                        self.session = None
+                    async def __aenter__(self):
+                        self.session = CurlAsyncSession(impersonate="chrome120")
+                        await self.session.__aenter__()
+                        c_resp = await self.session.get(self.url, headers=self.headers, proxy=self.proxy, timeout=30)
+                        
+                        class AioHttpMock:
+                            def __init__(self, c_resp, session):
+                                self.status = c_resp.status_code
+                                self.headers = c_resp.headers
+                                self.url = c_resp.url
+                                self._content = c_resp.content
+                                self.session = session
+                                class Content:
+                                    def __init__(self, data): self.data = data
+                                    async def iter_chunked(self, n):
+                                        for i in range(0, len(self.data), n): yield self.data[i:i+n]
+                                self.content = Content(c_resp.content)
+                            async def read(self): return self._content
+                        return AioHttpMock(c_resp, self.session)
+                    async def __aexit__(self, exc_type, exc, tb):
+                        if self.session: await self.session.__aexit__(exc_type, exc, tb)
+
+                resp_ctx = CurlContextManager(stream_url, headers, curl_proxy)
+            else:
+                resp_ctx = session.get(stream_url, headers=headers, ssl=not disable_ssl)
+
+            async with resp_ctx as resp:
+                content_type = resp.headers.get("content-type", "")
                 print(f"   Upstream Response: {resp.status} [{content_type}]")
 
                 # ✅ FIX: Se la risposta non è OK, restituisci direttamente l'errore senza processare
