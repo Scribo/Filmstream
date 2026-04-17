@@ -1089,9 +1089,6 @@ class HLSProxy:
                     
                     combined_headers[header_name] = param_value
 
-            # DEBUG LOGGING
-            print(f"🔍 [DEBUG] Processing URL: {target_url}")
-            print(f"   Headers: {dict(request.headers)}")
 
             captured_manifest = None
             is_rewritten_hls_segment = request.path.startswith("/proxy/hls/segment.")
@@ -1110,7 +1107,6 @@ class HLSProxy:
                     }:
                         continue
                     stream_headers[header_name] = header_value
-                print("   Extractor: direct-segment-proxy")
             else:
                 extractor = await self.get_extractor(target_url, combined_headers)
                 
@@ -1121,7 +1117,6 @@ class HLSProxy:
                 if extractor:
                     extractor.request_headers = combined_headers
 
-                print(f"   Extractor: {type(extractor).__name__}")
 
                 # Passa il flag force_refresh all'estrattore
                 result = await extractor.extract(
@@ -1133,8 +1128,6 @@ class HLSProxy:
                 stream_headers = result.get("request_headers", {})
                 captured_manifest = result.get("captured_manifest")
 
-            print(f"   Resolved Stream URL: {stream_url}")
-            print(f"   Stream Headers: {stream_headers}")
 
             # Se redirect_stream è False, restituisci il JSON con i dettagli (stile MediaFlow)
             if not redirect_stream:
@@ -2097,9 +2090,16 @@ class HLSProxy:
                 target[name] = value
 
             # Passa attraverso alcuni headers del client, ma FILTRA quelli che potrebbero leakare l'IP
+            # Rimuoviamo specificamente i condizionali che possono causare 412/416 con URL dinamici
             for header in ["range", "if-none-match", "if-modified-since"]:
                 if header in request.headers:
                     headers[header] = request.headers[header]
+
+            # ✅ FIX: Esplicita rimozione di If-Match e If-Range che spesso causano 416 su CDNs dinamici
+            for h in ["if-match", "if-range"]:
+                if h in headers: del headers[h]
+                keys_to_remove = [k for k in headers.keys() if k.lower() == h]
+                for k in keys_to_remove: del headers[k]
 
             # Manifest requests must be fetched in full. Some players probe the
             # entry URL with a byte range, which turns upstream playlists into
@@ -2192,19 +2192,21 @@ class HLSProxy:
 
             async with resp_ctx as resp:
                 content_type = resp.headers.get("content-type", "")
-                print(f"   Upstream Response: {resp.status} [{content_type}]")
 
                 # ✅ FIX: Se la risposta non è OK, restituisci direttamente l'errore senza processare
                 if resp.status not in [200, 206]:
                     error_body = await resp.read()
-                    logger.warning(
-                        f"⚠️ Upstream returned error {resp.status} for {stream_url}"
-                    )
-                    # ✅ DEBUG: Log error body to understand what CDN is complaining about
-                    try:
-                        print(f"   ❌ Error Body: {error_body.decode('utf-8')[:500]}")
-                    except:
-                        print(f"   ❌ Error Body (bytes): {error_body[:200]}")
+                    
+                    # DoodStream CDNs often report a 416 when VLC probes the end of file.
+                    # If it's benign (video still works), we silence it below WARNING level.
+                    is_dood_416 = resp.status == 416 and "cloudatacdn.com" in stream_url
+                    
+                    if is_dood_416:
+                        logger.debug(f"ℹ️ DoodStream 416 (benign/range-end): {stream_url}")
+                    else:
+                        logger.warning(
+                            f"⚠️ Upstream returned error {resp.status} for {stream_url}"
+                        )
                     return web.Response(
                         body=error_body,
                         status=resp.status,
@@ -2225,13 +2227,15 @@ class HLSProxy:
                 )
                 if is_direct_media_stream:
                     response_headers = {}
+                    # Filtriamo etag e last-modified per evitare che il client (VLC) 
+                    # mandi If-Match/If-Modified-Since nelle richieste successive.
                     for header in [
                         "content-type",
                         "content-length",
                         "content-range",
                         "accept-ranges",
-                        "last-modified",
-                        "etag",
+                        # "last-modified", # RIMOSSO
+                        # "etag",          # RIMOSSO
                     ]:
                         if header in resp.headers:
                             response_headers[header] = resp.headers[header]
