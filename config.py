@@ -147,6 +147,10 @@ if DVR_ENABLED and not os.path.exists(RECORDINGS_DIR):
 
 # MPD Processing Mode: 'ffmpeg' (transcoding) or 'legacy' (mpd_converter)
 MPD_MODE = os.environ.get("MPD_MODE", "legacy").lower()
+
+# --- Byparr Configuration ---
+BYPARR_URL = os.environ.get("BYPARR_URL", "http://localhost:8191").rstrip("/")
+BYPARR_TIMEOUT = int(os.environ.get("BYPARR_TIMEOUT", 30))
 if MPD_MODE not in ("ffmpeg", "legacy"):
     logging.warning(f"⚠️ MPD_MODE '{MPD_MODE}' is invalid. Using 'legacy' as default.")
     MPD_MODE = "legacy"

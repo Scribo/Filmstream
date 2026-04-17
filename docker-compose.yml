@@ -4,11 +4,15 @@ services:
     container_name: easyproxy
     restart: unless-stopped
     shm_size: "1gb"
+    depends_on:
+      - byparr
     ports:
       - '${PORT:-7860}:${PORT:-7860}' #modifica la variabile "PORT" per cambiare la porta
     environment:
       - API_PASSWORD=ep      #qui inserisci la tua password personalizzata
       - PORT=7860
+      - BYPARR_URL=http://byparr:8191
+      - BYPARR_TIMEOUT=30
       #- WORKERS=2            # Se commentato, usa il numero di core della CPU (nproc)
       
       # Scegli come gestire gli stream MPD/DASH:
@@ -31,3 +35,12 @@ services:
       # - DISABLE_SSL: per disattivare la verifica ssl
       
       #- TRANSPORT_ROUTES={URL=vavoo.to, PROXY=socks5://proxy1:1080, DISABLE_SSL=true}, {URL=dlhd.dad, PROXY=http://proxy2:8080, DISABLE_SSL=true}
+
+  byparr:
+    image: ghcr.io/thephaseless/byparr:latest
+    container_name: byparr
+    restart: unless-stopped
+    init: true
+    # Per usare Byparr all'esterno del network interno, decommenta le porte:
+    # ports:
+    #   - "8191:8191"
