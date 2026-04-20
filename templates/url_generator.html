@@ -97,14 +97,14 @@
                             <input id="proxyRedirectStream" type="checkbox" class="h-4 w-4 accent-sky-600">
                             <span>Add <code>redirect_stream=true</code></span>
                         </label>
-                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Automatically redirects to the proxied stream URL instead of showing JSON details.</p>
+                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Redirects to the proxied stream (server still handles traffic).</p>
                     </div>
                     <div class="flex-1 min-w-[200px]">
                         <label class="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 px-4 py-3 text-sm text-slate-700 dark:text-slate-200 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition">
                             <input id="proxyDirect" type="checkbox" class="h-4 w-4 accent-sky-600">
-                            <span>Add <code>direct=1</code> (Bypass Proxy)</span>
+                            <span>Add <code>direct=1</code></span>
                         </label>
-                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Forces use of the server's real IP, bypassing WARP/VPN (useful to avoid proxy blocks).</p>
+                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Forces server's real IP, bypassing WARP (avoids proxy blocks).</p>
                     </div>
                 </div>
                 <div class="flex gap-3">
@@ -184,14 +184,14 @@
                             <input id="extractorRedirectStream" type="checkbox" class="h-4 w-4 accent-sky-600">
                             <span>Add <code>redirect_stream=true</code></span>
                         </label>
-                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Redirects directly to the final proxied stream instead of showing JSON info.</p>
+                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Redirects to the proxied stream (server still handles traffic).</p>
                     </div>
                     <div class="flex-1 min-w-[200px]">
                         <label class="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/30 px-4 py-3 text-sm text-slate-700 dark:text-slate-200 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50 transition">
                             <input id="extractorDirect" type="checkbox" class="h-4 w-4 accent-sky-600">
                             <span>Add <code>direct=1</code></span>
                         </label>
-                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Extraction occurs using the server's real IP, ignoring WARP/Proxy.</p>
+                        <p class="mt-1 ml-1 text-[10px] text-slate-500 dark:text-slate-400 italic">Extraction occurs using the server's real IP (ignoring WARP).</p>
                     </div>
                 </div>
                 <div class="flex gap-3">

@@ -1796,6 +1796,8 @@ class HLSProxy:
 
             # Collect all query parameters to pass to the extractor
             extractor_kwargs = dict(request.query)
+            extractor_kwargs.pop('url', None) # Remove to avoid duplicate argument error
+            extractor_kwargs.pop('d', None)   # Remove to avoid duplicate argument error
             extractor_kwargs['request_headers'] = dict(request.headers)
 
             extractor = await self.get_extractor(
