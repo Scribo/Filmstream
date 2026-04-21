@@ -65,7 +65,8 @@ class FFmpegManager:
                      logger.warning(f"Stream {stream_id} timed out initializing. Restarting.")
                      try:
                         proc.kill()
-                     except: pass
+                     except Exception:
+                        pass
                      del self.processes[stream_id]
 
             else:
@@ -203,7 +204,8 @@ class FFmpegManager:
                  # Kill process?
                  try:
                      process.terminate()
-                 except: pass
+                 except Exception:
+                    pass
                  return None
                 
             return f"{stream_id}/index.m3u8"
