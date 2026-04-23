@@ -48,6 +48,7 @@ class MixdropExtractor:
             "cmd": cmd,
             "maxTimeout": (FLARESOLVERR_TIMEOUT + 60) * 1000,
         }
+        fs_headers = {}
         if url: 
             payload["url"] = url
             # Determina dinamicamente il proxy per questo specifico URL
@@ -55,7 +56,12 @@ class MixdropExtractor:
             if proxy:
                 # FlareSolverr richiede il proxy nel formato {"url": "..."}
                 payload["proxy"] = {"url": proxy}
-                logger.debug(f"Mixdrop: Passing proxy to FlareSolverr: {proxy}")
+                # Support Byparr specific implementation (headers instead of JSON)
+                clean_proxy = proxy
+                if clean_proxy.startswith("socks5h://"):
+                    clean_proxy = clean_proxy.replace("socks5h://", "socks5://")
+                fs_headers["X-Proxy-Server"] = clean_proxy
+                logger.debug(f"Mixdrop: Passing proxy to FlareSolverr/Byparr: {clean_proxy}")
 
         if post_data: payload["postData"] = post_data
         if session_id: payload["session"] = session_id
@@ -65,6 +71,7 @@ class MixdropExtractor:
                 async with fs_session.post(
                     endpoint,
                     json=payload,
+                    headers=fs_headers,
                     timeout=aiohttp.ClientTimeout(total=FLARESOLVERR_TIMEOUT + 95),
                 ) as resp:
                     if resp.status != 200:
