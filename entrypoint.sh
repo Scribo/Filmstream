@@ -48,29 +48,33 @@ if [ "$ENABLE_WARP" = "true" ]; then
             ) || true
         done
 
-        warp-cli --accept-tos mode warp > /dev/null 2>&1 || true
+        # Set mode to Proxy (SOCKS5 mode)
+        warp-cli --accept-tos mode proxy
+        # Set proxy port to 1080
+        warp-cli --accept-tos proxy port 1080
+        
         warp-cli --accept-tos connect
-
-        echo "Waiting for WARP VPN tunnel to become active..."
-        MAX_WAIT=15
-        for i in $(seq 1 $MAX_WAIT); do
-            if warp-cli --accept-tos status 2>/dev/null | grep -qi "Connected"; then
-                if curl https://www.google.com -o /dev/null -m 5 > /dev/null 2>&1; then
-                    echo "WARP VPN is connected and Internet is reachable."
-                    break
-                fi
-            fi
-            echo "Waiting for WARP VPN readiness... ($i/$MAX_WAIT)"
-            sleep 1
-        done
-
+        
+        # Small delay for connection to stabilize
+        echo "⏳ Waiting for WARP to stabilize (10s)..."
+        sleep 10
+        
+        # Check if SOCKS5 proxy is actually listening
+        if command -v nc >/dev/null 2>&1 && nc -z 127.0.0.1 1080; then
+            echo "✅ WARP SOCKS5 proxy is listening on port 1080."
+        else
+            echo "⚠️ WARP SOCKS5 proxy not detected on port 1080 yet, but proceeding..."
+        fi
+        
         warp-cli --accept-tos status
+
     fi
 fi
 
 PROXY_VARS=""
 if [ "$ENABLE_WARP" = "true" ]; then
-    echo "FlareSolverr/Byparr will use the system WARP VPN tunnel. Excluded hosts: $WARP_EXCLUDED_HOSTS"
+    PROXY_VARS="HTTP_PROXY=socks5://127.0.0.1:1080 HTTPS_PROXY=socks5://127.0.0.1:1080"
+    echo "FlareSolverr/Byparr will use WARP SOCKS5 proxy: socks5://127.0.0.1:1080"
 fi
 
 echo "Starting FlareSolverr (v3 Python)..."
