@@ -214,37 +214,55 @@ class DeltabitExtractor:
         session_id = None
         try:
             import ddddocr
+            ocr = ddddocr.DdddOcr(show_ad=False)
         except ImportError:
-            ddddocr = None
+            ocr = None
 
         try:
             sess_res = await self._request_flaresolverr("sessions.create")
             session_id = sess_res.get("session")
 
             current_url = url
-            for _ in range(5): # Massimo 5 salti di redirector
+            for step in range(5): # Massimo 5 salti di redirector
                 if not any(d in current_url.lower() for d in ["safego.cc", "clicka.cc", "clicka"]):
                     break
                 
+                logger.debug(f"Deltabit: Redirector step {step+1} at {current_url}")
                 res = await self._request_flaresolverr("request.get", current_url, session_id=session_id)
                 solution = res.get("solution", {})
                 text = solution.get("response", "")
                 current_url = solution.get("url", current_url)
                 soup = BeautifulSoup(text, "lxml")
                 
-                # Gestione Captcha
-                img_tag = soup.find("img", src=re.compile(r'data:image/png;base64,'))
-                if img_tag and ddddocr:
+                # Loop specifico per il Captcha (fino a 5 tentativi per step)
+                for captcha_attempt in range(5):
+                    img_tag = soup.find("img", src=re.compile(r'data:image/png;base64,'))
+                    if not img_tag or not ocr:
+                        break
+                    
+                    logger.debug(f"Deltabit: Captcha detected, attempt {captcha_attempt+1}")
                     img_data_b64 = img_tag["src"].split(",")[1]
                     img_data = base64.b64decode(img_data_b64)
                     
-                    ocr = ddddocr.DdddOcr(show_ad=False)
                     res_captcha = ocr.classification(img_data)
-                    logger.debug(f"Deltabit: Solved redirector captcha: {res_captcha}")
+                    logger.debug(f"Deltabit: OCR Result: {res_captcha}")
                     
                     post_data = urlencode({"captch5": res_captcha, "submit": "Continue"})
                     post_res = await self._request_flaresolverr("request.post", current_url, post_data, session_id=session_id)
-                    text = post_res.get("solution", {}).get("response", "")
+                    post_solution = post_res.get("solution", {})
+                    text = post_solution.get("response", "")
+                    current_url = post_solution.get("url", current_url)
+                    
+                    if "Incorrect" not in text:
+                        logger.debug("Deltabit: Captcha passed!")
+                        soup = BeautifulSoup(text, "lxml")
+                        break
+                    
+                    logger.debug("Deltabit: Captcha incorrect, retrying with new image...")
+                    await asyncio.sleep(2)
+                    # Ricarica la pagina per avere un nuovo captcha
+                    res = await self._request_flaresolverr("request.get", current_url, session_id=session_id)
+                    text = res.get("solution", {}).get("response", "")
                     soup = BeautifulSoup(text, "lxml")
 
                 # Cerca il link di uscita
@@ -284,7 +302,7 @@ class DeltabitExtractor:
                             break
 
                     if attempt < 2:
-                        await asyncio.sleep(3)
+                        await asyncio.sleep(4)
                         res = await self._request_flaresolverr("request.get", current_url, session_id=session_id)
                         text = res.get("solution", {}).get("response", "")
                         soup = BeautifulSoup(text, "lxml")
