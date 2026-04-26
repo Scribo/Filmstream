@@ -95,13 +95,13 @@ def parse_transport_routes() -> list:
 _PROXY_STATUS_CACHE = {"alive": True, "last_check": 0}
 
 
-def is_proxy_alive(proxy_url: str) -> bool:
+def is_proxy_alive(proxy_url: str, force_check: bool = False) -> bool:
     """Checks if a local proxy is reachable to avoid 'Connection Refused' errors."""
     if not proxy_url or "127.0.0.1" not in proxy_url:
         return True
 
     now = time.time()
-    if now - _PROXY_STATUS_CACHE["last_check"] < 10:
+    if not force_check and now - _PROXY_STATUS_CACHE["last_check"] < 10:
         return _PROXY_STATUS_CACHE["alive"]
 
     _PROXY_STATUS_CACHE["last_check"] = now
@@ -120,6 +120,16 @@ def is_proxy_alive(proxy_url: str) -> bool:
         _PROXY_STATUS_CACHE["alive"] = False
         logging.warning(f"Local proxy {proxy_url} is NOT reachable. Falling back to direct connection.")
         return False
+
+
+def mark_proxy_dead(proxy_url: str):
+    """Manually mark a proxy as dead in the cache (e.g. after a failed request)."""
+    if not proxy_url or "127.0.0.1" not in proxy_url:
+        return
+        
+    _PROXY_STATUS_CACHE["alive"] = False
+    _PROXY_STATUS_CACHE["last_check"] = time.time()
+    logging.warning(f"Proxy {proxy_url} marked as dead after failure.")
 
 
 def get_proxy_for_url(url: str, transport_routes: list, global_proxies: list, bypass_warp: bool = None) -> str:
