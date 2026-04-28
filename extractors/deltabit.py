@@ -93,7 +93,6 @@ class DeltabitExtractor:
                 fs_headers["X-Proxy-Server"] = get_solver_proxy_url(proxy)
         if post_data: payload["postData"] = post_data
         if session_id: payload["session"] = session_id
-        if headers: payload["headers"] = headers
         async with aiohttp.ClientSession() as fs_session:
             async with fs_session.post(endpoint, json=payload, headers=fs_headers, timeout=settings.flaresolverr_timeout + 95) as resp:
                 data = await resp.json()
@@ -134,7 +133,7 @@ class DeltabitExtractor:
             if "deltabit.co" in url.lower(): url = url.replace("deltabit.co/ ", "deltabit.co/")
             
             # 2. Final page fetch (FlareSolverr for stability)
-            res = await self._request_flaresolverr("request.get", url, session_id=session_id, wait=2000, headers=self._step_headers(ua, url))
+            res = await self._request_flaresolverr("request.get", url, session_id=session_id, wait=2000)
             solution = res.get("solution", {})
             html, ua = solution.get("response", ""), solution.get("userAgent", self.base_headers.get("User-Agent"))
             # Collect final cookies
@@ -157,7 +156,7 @@ class DeltabitExtractor:
             form_data['imhuman'], form_data['referer'] = "", url
             await asyncio.sleep(2.5) 
             
-            post_res = await self._request_flaresolverr("request.post", url, urlencode(form_data), session_id=session_id, wait=0, headers=self._step_headers(ua, url))
+            post_res = await self._request_flaresolverr("request.post", url, urlencode(form_data), session_id=session_id, wait=0)
             post_solution = post_res.get("solution", {})
             post_html = post_solution.get("response", "")
             # Update cookies after POST
@@ -175,7 +174,7 @@ class DeltabitExtractor:
                 await solver_manager.release_session(final_session_id, is_persistent)
 
     async def _solve_redirector_hybrid(self, url: str, session_id: str) -> tuple:
-        res = await self._request_flaresolverr("request.get", url, session_id=session_id, headers=self._step_headers(self.base_headers.get("User-Agent"), url))
+        res = await self._request_flaresolverr("request.get", url, session_id=session_id)
         solution = res.get("solution", {})
         ua, cookies = solution.get("userAgent"), {c["name"]: c["value"] for c in solution.get("cookies", [])}
         html, current_url = solution.get("response", ""), solution.get("url", url)
@@ -200,7 +199,7 @@ class DeltabitExtractor:
                 fs_counter += 1
                 try:
                     fs_cmd = "request.post" if post_data else "request.get"
-                    fs_res = await self._request_flaresolverr(fs_cmd, target_url, urlencode(post_data) if post_data else None, session_id=session_id, headers=request_headers)
+                    fs_res = await self._request_flaresolverr(fs_cmd, target_url, urlencode(post_data) if post_data else None, session_id=session_id)
                     sol = fs_res.get("solution", {})
                     cookies.update({c["name"]: c["value"] for c in sol.get("cookies", [])})
                     return sol.get("response", ""), sol.get("url", target_url)
@@ -264,7 +263,7 @@ class DeltabitExtractor:
                 logger.info(f"Using FlareSolverr fallback for {target_url}")
                 try:
                     fs_cmd = "request.post" if post_data else "request.get"
-                    fs_res = await self._request_flaresolverr(fs_cmd, target_url, urlencode(post_data) if post_data else None, session_id=session_id, headers=request_headers)
+                    fs_res = await self._request_flaresolverr(fs_cmd, target_url, urlencode(post_data) if post_data else None, session_id=session_id)
                     sol = fs_res.get("solution", {})
                     cookies.update({c["name"]: c["value"] for c in sol.get("cookies", [])})
                     return sol.get("response", ""), sol.get("url", target_url)
@@ -290,7 +289,7 @@ class DeltabitExtractor:
             if fs_counter < max_fs_calls:
                 fs_counter += 1
                 try:
-                    fs_res = await self._request_flaresolverr("request.get", target_url, session_id=session_id, headers=request_headers)
+                    fs_res = await self._request_flaresolverr("request.get", target_url, session_id=session_id)
                     solution = fs_res.get("solution", {})
                     response_text = solution.get("response", "")
                     if "base64" in response_text or len(response_text) > 1000:
