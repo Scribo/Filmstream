@@ -48,29 +48,40 @@ class FreeProxyManager:
         all_candidates = []
         scraper = cloudscraper.create_scraper(delay=2)
         
-        for url in self.list_urls:
+        async def fetch_one(url):
             try:
                 logger.debug(f"ProxyManager[{self.name}]: Fetching from {url}")
-                resp = await asyncio.to_thread(scraper.get, url, timeout=25)
+                # Use a smaller timeout for faster pool initialization
+                resp = await asyncio.to_thread(scraper.get, url, timeout=15)
                 resp.raise_for_status()
                 
-                count = 0
+                candidates = []
                 for line in resp.text.splitlines():
                     line = line.strip()
                     if not line:
                         continue
                     normalized = self._normalize_proxy_url(line)
-                    if normalized and normalized not in all_candidates:
-                        all_candidates.append(normalized)
-                        count += 1
-                        if self.max_fetch > 0 and len(all_candidates) >= self.max_fetch:
-                            break
-                logger.info(f"ProxyManager[{self.name}]: Fetched {count} candidates from {url}")
-                if self.max_fetch > 0 and len(all_candidates) >= self.max_fetch:
-                    break
+                    if normalized:
+                        candidates.append(normalized)
+                return candidates
             except Exception as e:
-                logger.warning(f"ProxyManager[{self.name}]: Failed to fetch proxy list from {url}: {e}")
+                logger.debug(f"ProxyManager[{self.name}]: Failed to fetch proxy list from {url}: {e}")
+                return []
+
+        # Fetch all URLs in parallel
+        tasks = [asyncio.create_task(fetch_one(url)) for url in self.list_urls]
+        results = await asyncio.gather(*tasks)
         
+        seen = set()
+        for candidates in results:
+            for c in candidates:
+                if c not in seen:
+                    all_candidates.append(c)
+                    seen.add(c)
+                    if self.max_fetch > 0 and len(all_candidates) >= self.max_fetch:
+                        return all_candidates
+        
+        logger.info(f"ProxyManager[{self.name}]: Fetched total {len(all_candidates)} candidates from {len(self.list_urls)} sources")
         return all_candidates
 
     async def _probe_proxy_worker(self, proxy_url: str, probe_func: Callable[[str], Any], semaphore: asyncio.Semaphore, good_list: List[str], ready_event: Optional[asyncio.Event] = None):
@@ -97,28 +108,30 @@ class FreeProxyManager:
             except Exception:
                 pass
 
-    async def get_proxies(self, probe_func: Callable[[str], Any], force_refresh: bool = False) -> List[str]:
+    async def get_proxies(self, probe_func: Optional[Callable[[str], Any]] = None, force_refresh: bool = False) -> List[str]:
+        if probe_func is None:
+            probe_func = lambda x: True
         now = time.time()
         
-        # Se abbiamo già dei proxy e non sono scaduti, ma ne vogliamo "di più" per la rotazione,
-        # continuiamo solo se il pool è piccolo (es. < 50) per evitare check infiniti.
-        should_find_more = len(self.proxies) < 50 and not force_refresh
+        # We need a minimum amount of working proxies.
+        min_required = int(os.environ.get("PROXY_MANAGER_MIN_POOL", "5"))
+        should_find_more = len(self.proxies) < min_required and not force_refresh
         
         if not force_refresh and self.proxies and self.expires_at > now and not should_find_more:
             return list(self.proxies)
 
         async with self._refresh_lock:
-            # Controllo se nel frattempo un altro task ha aggiornato
-            if not force_refresh and self.proxies and self.expires_at > time.time() and len(self.proxies) >= 50:
+            # Double check after acquiring lock
+            if not force_refresh and self.proxies and self.expires_at > time.time() and len(self.proxies) >= min_required:
                 return list(self.proxies)
 
-            logger.info(f"ProxyManager[{self.name}]: Incremental validation (+2 proxies)...")
-            
-            # Se la cache è scaduta o forziamo, resettiamo tutto
+            # Reset cache if expired or forced
             if force_refresh or self.expires_at <= time.time():
+                logger.info(f"ProxyManager[{self.name}]: Refreshing candidate list...")
                 self.proxies = []
                 self.expires_at = time.time() + self.cache_ttl
                 self._candidates_cache = await self._fetch_candidates()
+                self._tested_indices = set()
             
             if not hasattr(self, '_candidates_cache') or not self._candidates_cache:
                 self._candidates_cache = await self._fetch_candidates()
@@ -126,55 +139,89 @@ class FreeProxyManager:
             if not self._candidates_cache:
                 return list(self.proxies)
 
-            # Prendiamo i candidati che non abbiamo ancora testato in questo ciclo
             if not hasattr(self, '_tested_indices'):
                 self._tested_indices = set()
             
-            remaining = [c for i, c in enumerate(self._candidates_cache) if i not in self._tested_indices]
-            if not remaining:
-                # Abbiamo finito i candidati, resettiamo il set per ricominciare se serve
+            # Identify candidates not yet tested
+            remaining_indices = [i for i in range(len(self._candidates_cache)) if i not in self._tested_indices]
+            if not remaining_indices:
+                logger.info(f"ProxyManager[{self.name}]: All candidates tested. Resetting test history.")
                 self._tested_indices = set()
-                remaining = self._candidates_cache
+                remaining_indices = list(range(len(self._candidates_cache)))
 
             good_this_round = []
-            semaphore = asyncio.Semaphore(50) # Meno concorrenza per check incrementali
-            ready_event = asyncio.Event()
+            # Use a more reasonable concurrency limit
+            concurrency = int(os.environ.get("PROXY_MANAGER_CONCURRENCY", "30"))
             
-            # Tasks per questa tornata
-            tasks = []
-            for i, candidate in enumerate(remaining):
-                # Usiamo una funzione wrapper per segnare l'indice come testato
-                async def test_and_mark(c=candidate, idx=i):
-                    await self._probe_proxy_worker(c, probe_func, semaphore, good_this_round, ready_event)
-                    self._tested_indices.add(idx)
+            # Use a queue-based worker approach to avoid task explosion
+            queue = asyncio.Queue()
+            for idx in remaining_indices:
+                queue.put_nowait(idx)
 
-                tasks.append(asyncio.create_task(test_and_mark()))
-
-            # Aspetta finché non ne troviamo 2 NUOVI o finché non finiscono i tasks
-            try:
-                # Controlliamo ogni secondo se ne abbiamo trovati 2
-                while len(good_this_round) < 2:
-                    # Se tutti i task sono finiti, usciamo
-                    if all(t.done() for t in tasks):
+            found_enough_event = asyncio.Event()
+            
+            async def worker():
+                while not queue.empty() and not found_enough_event.is_set():
+                    try:
+                        idx = queue.get_nowait()
+                    except asyncio.QueueEmpty:
                         break
-                    await asyncio.sleep(0.5)
-            except Exception:
-                pass
+                        
+                    candidate = self._candidates_cache[idx]
+                    self._tested_indices.add(idx)
+                    
+                    try:
+                        if asyncio.iscoroutinefunction(probe_func):
+                            is_good = await probe_func(candidate)
+                        else:
+                            is_good = await asyncio.to_thread(probe_func, candidate)
+                        
+                        if is_good:
+                            good_this_round.append(candidate)
+                            logger.info(f"ProxyManager[{self.name}]: Found working proxy: {candidate}")
+                            # Stop if we found enough for this incremental round (e.g. 3 new ones)
+                            if len(good_this_round) >= 3:
+                                found_enough_event.set()
+                    except Exception:
+                        pass
+                    finally:
+                        queue.task_done()
+
+            # Start workers
+            workers = [asyncio.create_task(worker()) for _ in range(min(concurrency, len(remaining_indices)))]
+            
+            try:
+                # Wait for workers to finish or for us to find enough
+                done_task, pending = await asyncio.wait(
+                    [asyncio.create_task(queue.join()), asyncio.create_task(found_enough_event.wait())],
+                    return_when=asyncio.FIRST_COMPLETED,
+                    timeout=60 # Max 60 seconds per refresh attempt
+                )
+            except Exception as e:
+                logger.warning(f"ProxyManager[{self.name}]: Refresh timed out or failed: {e}")
             finally:
-                # FERMA TUTTO: Cancella i task rimanenti per non sprecare CPU
-                for t in tasks:
-                    if not t.done():
-                        t.cancel()
+                # Cleanup workers
+                found_enough_event.set() # Stop workers
+                for w in workers:
+                    if not w.done():
+                        w.cancel()
+                
+                # Cleanup internal join/wait tasks if they were created
+                try:
+                    for t in pending: t.cancel()
+                except: pass
 
             if good_this_round:
                 for p in good_this_round:
                     if p not in self.proxies:
                         self.proxies.append(p)
-                logger.info(f"ProxyManager[{self.name}]: Found {len(good_this_round)} new proxies. Total pool: {len(self.proxies)}")
+                logger.info(f"ProxyManager[{self.name}]: Added {len(good_this_round)} new proxies. Pool size: {len(self.proxies)}")
+            else:
+                logger.warning(f"ProxyManager[{self.name}]: No new working proxies found in this round.")
             
             return list(self.proxies)
 
-    async def get_next_sequence(self, probe_func: Callable[[str], Any]) -> List[str]:
+    async def get_next_sequence(self, probe_func: Optional[Callable[[str], Any]] = None) -> List[str]:
         proxies = await self.get_proxies(probe_func)
         if not proxies:
             return []

@@ -25,7 +25,8 @@ from aiohttp import (
     ServerDisconnectedError,
     ClientConnectionError,
 )
-from aiohttp_socks import ProxyConnector
+from aiohttp_socks import ProxyConnector, ProxyError as AioProxyError
+from python_socks import ProxyError as PyProxyError
 
 try:
     from curl_cffi.requests import AsyncSession as CurlAsyncSession
@@ -51,6 +52,7 @@ from config import (
     WARP_PROXY_URL,
     BYPASS_WARP_CONTEXT,
     SELECTED_PROXY_CONTEXT,
+    mark_proxy_dead,
 )
 from extractors.generic import GenericHLSExtractor, ExtractorError
 from services.manifest_rewriter import ManifestRewriter
@@ -109,6 +111,7 @@ if MPD_MODE in ("legacy", "none", "disabled"):
     LiveTVExtractor,
     F16PxExtractor,
 ) = None, None, None, None, None
+DLStreamsExtractor = None
 StreamHGExtractor = None
 CinemaCityExtractor = None
 DeltabitExtractor = None
@@ -302,8 +305,9 @@ except ImportError:
 try:
     from extractors.dlstreams import DLStreamsExtractor
     logger.info("✅ DLStreamsExtractor module loaded.")
-except ImportError:
-    logger.warning("⚠️ DLStreamsExtractor module not found.")
+except Exception as e:
+    logger.warning("⚠️ DLStreamsExtractor failed to load: %s", e)
+    DLStreamsExtractor = None
 
 try:
     from extractors.cinemacity import CinemaCityExtractor
@@ -961,6 +965,15 @@ class HLSProxy:
                     return self.extractors[key]
 
             # 2. Auto-detection basata sull'URL
+            # ✅ NUOVO: Salta estrattori specifici se l'URL sembra già un link diretto a un media
+            # (evita di provare a estrarre un .mp4 come se fosse una pagina HTML)
+            path_lower = url.split('?')[0].lower()
+            if any(path_lower.endswith(ext) for ext in [".mp4", ".m3u8", ".ts", ".mkv", ".avi", ".mov", ".flv", ".wmv", ".mp3", ".aac", ".m4a", ".mpd"]):
+                key = "hls_generic"
+                if key not in self.extractors:
+                    self.extractors[key] = GenericHLSExtractor(request_headers, proxies=GLOBAL_PROXIES)
+                return self.extractors[key]
+
             if "vavoo.to" in url:
                 key = "vavoo_direct" if bypass_warp else "vavoo"
                 proxy = get_proxy_for_url("vavoo.to", TRANSPORT_ROUTES, GLOBAL_PROXIES, bypass_warp=bypass_warp)
@@ -1637,45 +1650,105 @@ class HLSProxy:
                     if disable_ssl:
                         ssl_context = False
 
-                    # Use helper to get proxy-enabled session
-                    mpd_session, mpd_proxy = await self._get_proxy_session(
-                        stream_url, bypass_warp=bypass_warp
-                    )
-                    if mpd_proxy:
-                        logger.info(
-                            f"📡 [MPD] Using session via proxy: {mpd_proxy}"
-                        )
-                    final_mpd_url = stream_url  # Will be updated if redirected
-
-                    try:
-                        async with mpd_session.get(
-                            stream_url,
-                            headers=stream_headers,
-                            ssl=ssl_context,
-                            allow_redirects=True,
-                        ) as resp:
-                            # Capture final URL after redirects (use for segment URL construction)
-                            final_mpd_url = str(resp.url)
-                            if final_mpd_url != stream_url:
-                                logger.info(f"↪️ MPD redirected to: {final_mpd_url}")
-
-                            if resp.status != 200:
-                                error_text = await resp.text()
-                                logger.error(
-                                    f"❌ Failed to fetch MPD. Status: {resp.status}, URL: {stream_url}"
+                    manifest_content = None
+                    retries = 2
+                    for attempt in range(retries):
+                        try:
+                            # Use helper to get proxy-enabled session
+                            mpd_session, mpd_proxy = await self._get_proxy_session(
+                                stream_url, bypass_warp=bypass_warp
+                            )
+                            if mpd_proxy:
+                                logger.info(
+                                    f"📡 [MPD] Attempt {attempt+1}/{retries} via proxy: {mpd_proxy}"
                                 )
-                                logger.error(f"   Headers: {stream_headers}")
-                                logger.error(
-                                    f"   Response: {error_text[:500]}"
-                                )  # Truncate for safety
-                                return web.Response(
-                                    text=f"Failed to fetch MPD: {resp.status}\nResponse: {error_text[:1000]}",
-                                    status=502,
-                                )
-                            manifest_content = await resp.text()
-                    finally:
-                        # Session is pooled/cached, so we don't close it
-                        pass
+                            
+                            async with mpd_session.get(
+                                stream_url,
+                                headers=stream_headers,
+                                ssl=ssl_context,
+                                allow_redirects=True,
+                            ) as resp:
+                                # Capture final URL after redirects
+                                final_mpd_url = str(resp.url)
+                                if final_mpd_url != stream_url:
+                                    logger.info(f"↪️ MPD redirected to: {final_mpd_url}")
+
+                                if resp.status != 200:
+                                    error_text = await resp.text()
+                                    logger.error(f"❌ Failed to fetch MPD (Status {resp.status}) at {stream_url}")
+                                    if attempt == retries - 1:
+                                        return web.Response(
+                                            text=f"Failed to fetch MPD: {resp.status}\nResponse: {error_text[:1000]}",
+                                            status=502,
+                                        )
+                                    await asyncio.sleep(1)
+                                    continue
+                                
+                                manifest_content = await resp.text()
+                                break # Success
+                        
+                        except (AioProxyError, PyProxyError, asyncio.TimeoutError, ClientConnectionError, OSError) as e:
+                            is_proxy = isinstance(e, (AioProxyError, PyProxyError))
+                            # Consider ClientConnectionError/OSError as proxy errors if a proxy was used
+                            if not is_proxy and mpd_proxy and isinstance(e, (ClientConnectionError, OSError)):
+                                is_proxy = True
+                                
+                            err_type = "Proxy" if is_proxy else "Timeout"
+                            logger.warning(f"⚠️ [MPD] {err_type} error at attempt {attempt+1}: {e}")
+                            
+                            # Mark local proxy as dead if it failed
+                            if mpd_proxy and "127.0.0.1" in mpd_proxy:
+                                mark_proxy_dead(mpd_proxy)
+                                # Also clear the cached session for this proxy
+                                if mpd_proxy in self.proxy_sessions:
+                                    logger.info(f"   [MPD] Removing broken proxy session from cache: {mpd_proxy}")
+                                    self.proxy_sessions.pop(mpd_proxy, None)
+                            
+                            # Clear sticky context if it's a proxy error
+                            if is_proxy and SELECTED_PROXY_CONTEXT.get():
+                                logger.info("   [MPD] Clearing sticky proxy context due to ProxyError")
+                                SELECTED_PROXY_CONTEXT.set(None)
+                            
+                            if attempt < retries - 1:
+                                logger.info("   [MPD] Retrying...")
+                                await asyncio.sleep(1)
+                            else:
+                                logger.warning("   [MPD] All proxy attempts failed. Trying direct connection as final fallback...")
+                                try:
+                                    # Final fallback: direct connection
+                                    async with self.session.get(
+                                        stream_url, headers=stream_headers, ssl=ssl_context, allow_redirects=True
+                                    ) as resp:
+                                        if resp.status == 200:
+                                            manifest_content = await resp.text()
+                                            final_mpd_url = str(resp.url)
+                                            logger.info("   [MPD] Direct fallback successful!")
+                                            break
+                                        else:
+                                            raise Exception(f"Direct fallback failed with status {resp.status}")
+                                except Exception as fallback_err:
+                                    logger.error(f"❌ [MPD] Direct fallback failed: {fallback_err}")
+                                    return web.Response(text=f"MPD unreachable via proxy and direct: {e}", status=502)
+                        except Exception as e:
+                            logger.error(f"❌ [MPD] Unexpected error at attempt {attempt+1}: {e}")
+                            if attempt == retries - 1:
+                                # Try one last direct fallback even for unexpected errors
+                                try:
+                                    async with self.session.get(
+                                        stream_url, headers=stream_headers, ssl=ssl_context, allow_redirects=True
+                                    ) as resp:
+                                        if resp.status == 200:
+                                            manifest_content = await resp.text()
+                                            final_mpd_url = str(resp.url)
+                                            logger.info("   [MPD] Direct fallback successful after unexpected error!")
+                                            break
+                                except: pass
+                                return web.Response(text=f"Unexpected error fetching MPD: {e}", status=500)
+                            await asyncio.sleep(1)
+
+                    if manifest_content is None:
+                         return web.Response(text="Failed to fetch MPD manifest after all attempts", status=502)
 
                     # Build proxy base URL
                     scheme = request.headers.get(
@@ -2012,6 +2085,10 @@ class HLSProxy:
 
             # 1. URL COMPLETO (Solo per il redirect)
             full_proxy_url = f"{proxy_base}{endpoint}?d={encoded_url}{header_params}"
+            
+            # Carry over redirect_stream param for nested redirects
+            if redirect_stream:
+                full_proxy_url += "&redirect_stream=true"
 
             if redirect_stream:
                 logger.debug(f"↪️ Redirecting to: {full_proxy_url}")
@@ -2542,6 +2619,7 @@ class HLSProxy:
         
         # Priorità: proxy passato esplicitamente -> proxy in query string
         forced_proxy = forced_proxy or request.query.get("proxy") or None
+
         try:
             # Ping DLStreams extractor to keep browser alive during playback
             # Use robust markers: Daddy's domains, 'premium' pattern, 'mono.css', or Referer/Origin headers
