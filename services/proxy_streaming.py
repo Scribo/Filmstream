@@ -57,7 +57,10 @@ class HLSProxyStreamingMixin:
             ext = get_browser_activity_extractor(self.extractors)
             if ext and hasattr(ext, "_update_shared_activity"):
                 ext._update_shared_activity()
-            self._touch_extractor_activity(request.query.get("extractor_key"))
+            self._touch_extractor_activity(
+                request.query.get("extractor_key"),
+                request.query.get("stream_key"),
+            )
 
             headers = dict(stream_headers)
             is_special_cdn = is_special_cdn_stream(segment_url)
@@ -203,7 +206,10 @@ class HLSProxyStreamingMixin:
             ext = get_browser_activity_extractor(self.extractors)
             if ext and hasattr(ext, "_update_shared_activity"):
                 ext._update_shared_activity()
-            self._touch_extractor_activity(request.query.get("extractor_key"))
+            self._touch_extractor_activity(
+                request.query.get("extractor_key"),
+                request.query.get("stream_key"),
+            )
 
             headers = dict(stream_headers)
 
@@ -723,6 +729,7 @@ class HLSProxyStreamingMixin:
                         selected_proxy=forced_proxy, # ✅ PASSA IL PROXY FORZATO
                         force_direct=force_direct,
                         extractor_key=request.query.get("extractor_key"),
+                        stream_key=request.query.get("stream_key"),
                     )
                     return web.Response(text=rewritten, headers={
                         "Content-Type": "application/vnd.apple.mpegurl",

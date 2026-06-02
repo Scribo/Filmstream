@@ -312,13 +312,26 @@ class HLSProxyCoreMixin:
         while True:
             await asyncio.sleep(60)
             now = time.time()
+            stale_streams = [
+                stream_ref for stream_ref, t in self._extractor_stream_atimes.items()
+                if now - t > 300
+            ]
+            for stream_ref in stale_streams:
+                self._extractor_stream_atimes.pop(stream_ref, None)
             stale_ext = [
                 k for k, t in self._extractor_atimes.items()
-                if now - t > 300 and k in self.extractors
+                if (
+                    now - t > 300
+                    and k in self.extractors
+                    and not any(ref[0] == k for ref in self._extractor_stream_atimes)
+                )
             ]
             for key in stale_ext:
                 ext = self.extractors.pop(key, None)
                 self._extractor_atimes.pop(key, None)
+                for stream_ref in list(self._extractor_stream_atimes):
+                    if stream_ref[0] == key:
+                        self._extractor_stream_atimes.pop(stream_ref, None)
                 if ext and hasattr(ext, 'close'):
                     try:
                         await ext.close()
@@ -702,13 +715,23 @@ class HLSProxyCoreMixin:
                 return key
         return None
 
-    def _touch_extractor_activity(self, extractor_key: str | None = None):
+    @staticmethod
+    def _stream_key_for_url(url: str | None) -> str | None:
+        if not url:
+            return None
+        return hashlib.md5(url.encode()).hexdigest()[:12]
+
+    def _touch_extractor_activity(self, extractor_key: str | None = None, stream_key: str | None = None):
         now = time.time()
         if extractor_key and extractor_key in self.extractors:
             self._extractor_atimes[extractor_key] = now
+            if stream_key:
+                self._extractor_stream_atimes[(extractor_key, stream_key)] = now
             return
         for key in self.extractors:
             self._extractor_atimes[key] = now
+            if stream_key:
+                self._extractor_stream_atimes[(key, stream_key)] = now
 
     async def _resolve_url_id(self, url_id: str) -> str | None:
         """Risolve un url_id nell'URL originale."""
@@ -751,6 +774,7 @@ class HLSProxyCoreMixin:
                 if hasattr(extractor, "close"):
                     await extractor.close()
             self._extractor_atimes.clear()
+            self._extractor_stream_atimes.clear()
 
             for task in self.captured_hls_refresh_tasks.values():
                 task.cancel()

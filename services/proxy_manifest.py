@@ -102,6 +102,7 @@ class HLSProxyManifestHandlerMixin:
                         selected_proxy=selected_proxy,
                         force_direct=force_direct,
                         extractor_key=request.query.get("extractor_key"),
+                        stream_key=request.query.get("stream_key"),
                     )
                     return web.Response(
                         text=rewritten_manifest,
@@ -137,6 +138,7 @@ class HLSProxyManifestHandlerMixin:
                         continue
                     stream_headers[header_name] = header_value
                 extractor_key = request.query.get("extractor_key")
+                stream_key = request.query.get("stream_key")
             else:
                 extractor = await self.get_extractor(target_url, combined_headers, bypass_warp=bypass_warp)
 
@@ -157,6 +159,7 @@ class HLSProxyManifestHandlerMixin:
                     proxy=request.query.get("proxy")
                 )
                 extractor_key = self._extractor_key_for_instance(extractor)
+                stream_key = self._stream_key_for_url(request.query.get("orig_url") or target_url)
                 bypass_warp = result.get("bypass_warp", bypass_warp)
                 stream_url = result["destination_url"]
                 stream_headers = result.get("request_headers", {})
@@ -260,6 +263,8 @@ class HLSProxyManifestHandlerMixin:
                     q_params["api_password"] = api_password
                 if 'extractor_key' in locals() and extractor_key:
                     q_params["extractor_key"] = extractor_key
+                if 'stream_key' in locals() and stream_key:
+                    q_params["stream_key"] = stream_key
 
                 response_data = {
                     "destination_url": stream_url,
@@ -319,6 +324,7 @@ class HLSProxyManifestHandlerMixin:
                     selected_proxy=selected_proxy,
                     force_direct=force_direct,
                     extractor_key=extractor_key if 'extractor_key' in locals() else request.query.get("extractor_key"),
+                    stream_key=stream_key if 'stream_key' in locals() else request.query.get("stream_key"),
                 )
                 return web.Response(
                     text=rewritten_manifest,
