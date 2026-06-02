@@ -8,9 +8,8 @@ import cloudscraper
 from bs4 import BeautifulSoup
 
 from config import (
-    get_proxy_for_url,
-    TRANSPORT_ROUTES,
     GLOBAL_PROXIES,
+    get_preferred_proxy_for_url,
 )
 from utils.cookie_cache import CookieCache
 
@@ -21,6 +20,18 @@ class ExtractorError(Exception):
 
 class MixdropExtractor:
     _result_cache = {}
+    _cache_ttl = 600
+    _cache_max_entries = 30
+
+    @classmethod
+    def _prune_result_cache(cls):
+        now = time.time()
+        expired = [key for key, (_, ts) in cls._result_cache.items() if now - ts >= cls._cache_ttl]
+        for key in expired:
+            cls._result_cache.pop(key, None)
+        while len(cls._result_cache) > cls._cache_max_entries:
+            oldest = min(cls._result_cache, key=lambda k: cls._result_cache[k][1])
+            cls._result_cache.pop(oldest, None)
 
     def __init__(self, request_headers: dict = None, proxies: list = None, bypass_warp: bool = False):
         self.request_headers = request_headers or {}
@@ -68,14 +79,15 @@ class MixdropExtractor:
     async def extract(self, url: str, **kwargs) -> dict:
         normalized_url = url.strip().replace(" ", "%20")
         cache_key = (normalized_url, self.bypass_warp_active)
+        MixdropExtractor._prune_result_cache()
         if cache_key in MixdropExtractor._result_cache:
             result, timestamp = MixdropExtractor._result_cache[cache_key]
-            if time.time() - timestamp < 600:
+            if time.time() - timestamp < MixdropExtractor._cache_ttl:
                 logger.info(f"🚀 [Cache Hit] Using cached extraction result for: {normalized_url}")
                 return result
 
         logger.info(f"🔍 [Cache Miss] Extracting new link for: {normalized_url}")
-        proxy = get_proxy_for_url(normalized_url, TRANSPORT_ROUTES, self.proxies, self.bypass_warp_active)
+        proxy = get_preferred_proxy_for_url(normalized_url, "mixdrop", self.proxies, self.bypass_warp_active)
         try:
             ua, cookies = self.base_headers.get("User-Agent"), {}
             if "/f/" in url: url = url.replace("/f/", "/e/")
@@ -99,7 +111,7 @@ class MixdropExtractor:
                 if depth > 3: return None
                 try:
                     m_headers = self._step_headers(ua, current_url)
-                    pref_p = get_proxy_for_url(current_url, TRANSPORT_ROUTES, self.proxies, self.bypass_warp_active)
+                    pref_p = get_preferred_proxy_for_url(current_url, "mixdrop", self.proxies, self.bypass_warp_active)
                     cs_proxies = _build_cs_proxies(pref_p)
                     
                     async def fetch_page():
@@ -158,11 +170,18 @@ class MixdropExtractor:
                 return None
 
             mirror_tasks = [asyncio.create_task(solve_url(m)) for m in mirrors]
-            for mt in asyncio.as_completed(mirror_tasks):
-                result = await mt
-                if result:
-                    MixdropExtractor._result_cache[cache_key] = (result, time.time())
-                    return result
+            try:
+                for mt in asyncio.as_completed(mirror_tasks):
+                    result = await mt
+                    if result:
+                        MixdropExtractor._result_cache[cache_key] = (result, time.time())
+                        MixdropExtractor._prune_result_cache()
+                        return result
+            finally:
+                for mt in mirror_tasks:
+                    if not mt.done():
+                        mt.cancel()
+                await asyncio.gather(*mirror_tasks, return_exceptions=True)
 
             raise ExtractorError("Mixdrop: Video source not found")
         finally:

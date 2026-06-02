@@ -7,7 +7,7 @@ from aiohttp import web
 # Aggiungi path corrente per import moduli
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from services.hls_proxy import HLSProxy
+from services.proxy import HLSProxy
 from services.ffmpeg_manager import FFmpegManager
 from config import PORT, DVR_ENABLED, RECORDINGS_DIR, MAX_RECORDING_DURATION, RECORDINGS_RETENTION_DAYS
 
@@ -190,6 +190,8 @@ def create_app():
     
     async def cleanup_handler(app):
         await proxy.cleanup()
+        from utils.solver_manager import shutdown_flaresolverr
+        await shutdown_flaresolverr()
     app.on_cleanup.append(cleanup_handler)
     
     async def on_startup(app):
