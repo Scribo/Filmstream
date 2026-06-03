@@ -525,7 +525,10 @@ class HLSProxyManifestHandlerMixin:
 
                             # Mark local proxy as dead if it failed
                             if mpd_proxy and "127.0.0.1" in mpd_proxy:
-                                mark_proxy_dead(mpd_proxy)
+                                self._mark_proxy_dead_if_allowed(
+                                    mpd_proxy,
+                                    extractor_key=request.query.get("extractor_key"),
+                                )
                                 # Also clear the cached session for this proxy
                                 if mpd_proxy in self.proxy_sessions:
                                     logger.info(f"   [MPD] Removing broken proxy session from cache: {mpd_proxy}")

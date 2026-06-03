@@ -733,6 +733,20 @@ class HLSProxyCoreMixin:
             if stream_key:
                 self._extractor_stream_atimes[(key, stream_key)] = now
 
+    def _mark_proxy_dead_if_allowed(self, proxy_url: str | None, dead_duration: int = 300, extractor_key: str | None = None):
+        if not proxy_url:
+            return
+        normalized_key = (extractor_key or "").replace("_direct", "")
+        extractor_proxies = get_extractor_proxies(normalized_key)
+        if len(extractor_proxies) == 1 and urllib.parse.unquote(proxy_url) == urllib.parse.unquote(extractor_proxies[0]):
+            logger.info(
+                "Proxy %s failed for extractor %s, but it is the only configured extractor proxy; keeping it alive.",
+                proxy_url,
+                normalized_key or extractor_key,
+            )
+            return
+        mark_proxy_dead(proxy_url, dead_duration=dead_duration)
+
     async def _resolve_url_id(self, url_id: str) -> str | None:
         """Risolve un url_id nell'URL originale."""
         if not url_id:
