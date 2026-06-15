@@ -102,7 +102,7 @@ Only basic environment variables need to be set in your `.env` file or container
 | `API_PASSWORD` | Password to protect the proxy API and admin panel | `ep` |
 
 ### 🛡️ Cloudflare WARP Integration
-The Docker image includes an integrated Cloudflare WARP client (running in userspace mode) to bypass IP-based blocks. **No elevated network permissions, `--cap-add=NET_ADMIN`, or `/dev/net/tun` mapping are required.**
+The Docker image includes an integrated Cloudflare WARP client to bypass IP-based blocks.
 
 You can enable and configure WARP, customize the excluded domains list, and enter your license key directly from the **Admin Panel**.
 
