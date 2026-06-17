@@ -7,13 +7,49 @@ import time
 import asyncio
 import contextvars
 import urllib.request
+import threading
 from dotenv import load_dotenv
 from config_store import get as _cfg_get, set as _cfg_set, get_all as _cfg_get_all
 
-APP_VERSION = "2.9.19"
+APP_VERSION = "2.9.20"
 
 _proxy_source_cache: dict[str, tuple[float, list]] = {}
 _PROXY_SOURCE_TTL = 600
+
+# Proxy-specific network counters (EasyProxy traffic only)
+_proxy_net_lock = threading.Lock()
+_proxy_net = {"sent": 0, "recv": 0}
+_proxy_net_prev = {"sent": 0, "recv": 0, "ts": 0}
+
+def record_proxy_net_sent(bytes_count: int):
+    if bytes_count <= 0:
+        return
+    with _proxy_net_lock:
+        _proxy_net["sent"] += bytes_count
+
+def record_proxy_net_recv(bytes_count: int):
+    if bytes_count <= 0:
+        return
+    with _proxy_net_lock:
+        _proxy_net["recv"] += bytes_count
+
+def get_proxy_net_rates():
+    with _proxy_net_lock:
+        now = time.time()
+        sent = _proxy_net["sent"]
+        recv = _proxy_net["recv"]
+        prev = _proxy_net_prev
+        if prev["ts"] and now - prev["ts"] > 0:
+            dt = now - prev["ts"]
+            sent_rate = max(0, (sent - prev["sent"]) / dt)
+            recv_rate = max(0, (recv - prev["recv"]) / dt)
+        else:
+            sent_rate = 0.0
+            recv_rate = 0.0
+        prev["sent"] = sent
+        prev["recv"] = recv
+        prev["ts"] = now
+    return {"sent": round(sent_rate, 1), "recv": round(recv_rate, 1)}
 
 
 def get_extractor_proxies(extractor_name: str) -> list:
@@ -994,6 +1030,59 @@ def get_system_stats():
         ram_free = max(0, docker_limit - docker_used)
         ram_percent = (ram_used / ram_total) * 100 if ram_total > 0 else 0
 
+    # EasyProxy process RAM (including child processes like ffmpeg, chrome, etc.)
+    proxy_ram_used = ram_used
+    proxy_ram_total = ram_total
+    proxy_ram_percent = ram_percent
+    try:
+        proc = psutil.Process(os.getpid())
+        proxy_ram_used = proc.memory_info().rss
+        for child in proc.children(recursive=True):
+            try:
+                proxy_ram_used += child.memory_info().rss
+            except Exception:
+                pass
+        proxy_ram_total = ram_total
+        proxy_ram_percent = (proxy_ram_used / proxy_ram_total) * 100 if proxy_ram_total > 0 else 0
+    except Exception:
+        pass
+
+    # EasyProxy process CPU (including child processes)
+    proxy_cpu_percent = cpu_percent
+    try:
+        # Use persistent Process objects: psutil.cpu_percent() needs a previous
+        # baseline reading, otherwise it always returns 0.0.
+        _cpu_proc = getattr(get_system_stats, "_cpu_proc", None)
+        if _cpu_proc is None:
+            _cpu_proc = psutil.Process(os.getpid())
+            get_system_stats._cpu_proc = _cpu_proc
+            _cpu_proc.cpu_percent(interval=None)  # establish baseline
+
+        _cpu_children = getattr(get_system_stats, "_cpu_children", {})
+        current_children = {c.pid: c for c in _cpu_proc.children(recursive=True)}
+        # Drop dead children and baseline new ones
+        for pid in list(_cpu_children.keys()):
+            if pid not in current_children:
+                del _cpu_children[pid]
+        for pid, child in current_children.items():
+            if pid not in _cpu_children:
+                _cpu_children[pid] = child
+                child.cpu_percent(interval=None)  # establish baseline
+
+        p_cpu = _cpu_proc.cpu_percent(interval=None)
+        for child in _cpu_children.values():
+            try:
+                p_cpu += child.cpu_percent(interval=None)
+            except Exception:
+                pass
+        get_system_stats._cpu_children = _cpu_children
+
+        cores = os.cpu_count() or 1
+        proxy_cpu_percent = min(100.0, p_cpu / cores)
+    except Exception:
+        pass
+
+    proxy_net = get_proxy_net_rates()
     return {
         "disk": {
             "total": disk_total,
@@ -1004,15 +1093,25 @@ def get_system_stats():
         "cpu": {
             "percent": round(cpu_percent, 1)
         },
+        "proxy_cpu": {
+            "percent": round(proxy_cpu_percent, 1)
+        },
         "ram": {
             "total": ram_total,
             "used": ram_used,
             "free": ram_free,
             "percent": round(ram_percent, 1)
         },
+        "proxy_ram": {
+            "total": proxy_ram_total,
+            "used": proxy_ram_used,
+            "free": max(0, proxy_ram_total - proxy_ram_used),
+            "percent": round(proxy_ram_percent, 1)
+        },
         "net": {
             "sent": round(net_sent, 1),
             "recv": round(net_recv, 1)
-        }
+        },
+        "proxy_net": proxy_net
     }
 

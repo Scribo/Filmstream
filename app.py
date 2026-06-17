@@ -15,11 +15,54 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from services.proxy import HLSProxy
 from services.ffmpeg_manager import FFmpegManager
-from config import PORT, RECORDINGS_DIR, APP_VERSION
+from config import PORT, RECORDINGS_DIR, APP_VERSION, record_proxy_net_sent, record_proxy_net_recv
 from services.recording_manager import RecordingManager
 from routes.recordings import setup_recording_routes
 
 logger = logging.getLogger(__name__)
+
+@web.middleware
+async def proxy_net_middleware(request, handler):
+    """Count bytes handled by EasyProxy for the admin network speed widget."""
+    try:
+        cl = request.headers.get('Content-Length')
+        if cl:
+            record_proxy_net_recv(int(cl))
+    except Exception:
+        pass
+
+    response = await handler(request)
+
+    try:
+        if isinstance(response, web.Response) and response.body is not None:
+            body = response.body
+            size = 0
+            if isinstance(body, (bytes, bytearray, memoryview)):
+                size = len(body)
+            elif isinstance(body, str):
+                size = len(body.encode('utf-8'))
+            elif hasattr(body, 'size'):
+                size = int(body.size)
+            if size > 0:
+                record_proxy_net_sent(size)
+        elif isinstance(response, web.FileResponse):
+            size = response.body_length or 0
+            if size > 0:
+                record_proxy_net_sent(size)
+        elif isinstance(response, web.StreamResponse):
+            orig_write = response.write
+            async def counted_write(chunk, *args, **kwargs):
+                if chunk:
+                    if isinstance(chunk, (bytes, bytearray, memoryview)):
+                        record_proxy_net_sent(len(chunk))
+                    elif isinstance(chunk, str):
+                        record_proxy_net_sent(len(chunk.encode('utf-8')))
+                return await orig_write(chunk, *args, **kwargs)
+            response.write = counted_write
+    except Exception:
+        pass
+
+    return response
 
 def _read_file(path):
     """Helper for async file reading via run_in_executor."""
@@ -37,7 +80,7 @@ def create_app():
 
     proxy = HLSProxy(ffmpeg_manager=ffmpeg_manager)
 
-    app = web.Application()
+    app = web.Application(middlewares=[proxy_net_middleware])
     app['ffmpeg_manager'] = ffmpeg_manager # Make accessible for routes
     app.ffmpeg_manager = ffmpeg_manager # Hack for access in route handler above function
     app['proxy'] = proxy

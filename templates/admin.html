@@ -776,21 +776,21 @@ async function loadConfig() {
         if (config.system_stats) {
             const stats = config.system_stats;
             
-            document.getElementById('cpu-percent').textContent = stats.cpu.percent + '%';
-            document.getElementById('cpu-bar').style.width = stats.cpu.percent + '%';
+            document.getElementById('cpu-percent').textContent = stats.proxy_cpu.percent + '%';
+            document.getElementById('cpu-bar').style.width = stats.proxy_cpu.percent + '%';
             
-            document.getElementById('ram-percent').textContent = stats.ram.percent + '%';
-            document.getElementById('ram-bar').style.width = stats.ram.percent + '%';
-            document.getElementById('ram-details').textContent = `${formatBytes(stats.ram.used)} / ${formatBytes(stats.ram.total)}`;
+            document.getElementById('ram-percent').textContent = stats.proxy_ram.percent + '%';
+            document.getElementById('ram-bar').style.width = stats.proxy_ram.percent + '%';
+            document.getElementById('ram-details').textContent = `${formatBytes(stats.proxy_ram.used)} / ${formatBytes(stats.proxy_ram.total)}`;
             
             document.getElementById('disk-percent').textContent = stats.disk.percent + '%';
             document.getElementById('disk-bar').style.width = stats.disk.percent + '%';
             document.getElementById('disk-details').textContent = `${formatBytes(stats.disk.used)} / ${formatBytes(stats.disk.total)} (Free: ${formatBytes(stats.disk.free)})`;
         }
 
-        // Network speed
-        if (config.system_stats && config.system_stats.net) {
-            const net = config.system_stats.net;
+        // Network speed (EasyProxy traffic only)
+        if (config.system_stats && config.system_stats.proxy_net) {
+            const net = config.system_stats.proxy_net;
             document.getElementById('net-down').textContent = formatSpeed(net.recv);
             document.getElementById('net-up').textContent = formatSpeed(net.sent);
             document.getElementById('net-speed').textContent = formatSpeed(net.recv + net.sent) + ' total';
@@ -1283,19 +1283,19 @@ setInterval(async () => {
             const tempConfig = await resp.json();
             if (tempConfig.system_stats) {
                 const stats = tempConfig.system_stats;
-                document.getElementById('cpu-percent').textContent = stats.cpu.percent + '%';
-                document.getElementById('cpu-bar').style.width = stats.cpu.percent + '%';
+                document.getElementById('cpu-percent').textContent = stats.proxy_cpu.percent + '%';
+                document.getElementById('cpu-bar').style.width = stats.proxy_cpu.percent + '%';
                 
-                document.getElementById('ram-percent').textContent = stats.ram.percent + '%';
-                document.getElementById('ram-bar').style.width = stats.ram.percent + '%';
-                document.getElementById('ram-details').textContent = `${formatBytes(stats.ram.used)} / ${formatBytes(stats.ram.total)}`;
+                document.getElementById('ram-percent').textContent = stats.proxy_ram.percent + '%';
+                document.getElementById('ram-bar').style.width = stats.proxy_ram.percent + '%';
+                document.getElementById('ram-details').textContent = `${formatBytes(stats.proxy_ram.used)} / ${formatBytes(stats.proxy_ram.total)}`;
                 
                 document.getElementById('disk-percent').textContent = stats.disk.percent + '%';
                 document.getElementById('disk-bar').style.width = stats.disk.percent + '%';
                 document.getElementById('disk-details').textContent = `${formatBytes(stats.disk.used)} / ${formatBytes(stats.disk.total)} (Free: ${formatBytes(stats.disk.free)})`;
             }
-            if (tempConfig.system_stats && tempConfig.system_stats.net) {
-                const net = tempConfig.system_stats.net;
+            if (tempConfig.system_stats && tempConfig.system_stats.proxy_net) {
+                const net = tempConfig.system_stats.proxy_net;
                 document.getElementById('net-down').textContent = formatSpeed(net.recv);
                 document.getElementById('net-up').textContent = formatSpeed(net.sent);
                 document.getElementById('net-speed').textContent = formatSpeed(net.recv + net.sent) + ' total';
