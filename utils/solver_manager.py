@@ -30,19 +30,16 @@ def _patch_playwright_bug():
                     with open(p, "r", encoding="utf-8") as f:
                         content = f.read()
                     
-                    replacements = {
-                        "url: pageError.location.url,": 'url: pageError.location ? pageError.location.url : "",',
-                        "line: pageError.location.lineNumber,": 'line: pageError.location ? pageError.location.lineNumber : 0,',
-                        "column: pageError.location.columnNumber,": 'column: pageError.location ? pageError.location.columnNumber : 0,',
-                        "column: pageError.location.column,": 'column: pageError.location ? pageError.location.column : 0,',
-                    }
+                    import re
                     
-                    patched = False
-                    for target, rep in replacements.items():
-                        if target in content:
-                            content = content.replace(target, rep)
-                            patched = True
-                            
+                    orig_content = content
+                    content = re.sub(r'url\s*:\s*pageError\s*\.\s*location\s*\.\s*url', 'url: pageError.location ? pageError.location.url : ""', content)
+                    content = re.sub(r'line\s*:\s*pageError\s*\.\s*location\s*\.\s*lineNumber', 'line: pageError.location ? pageError.location.lineNumber : 0', content)
+                    content = re.sub(r'column\s*:\s*pageError\s*\.\s*location\s*\.\s*columnNumber', 'column: pageError.location ? pageError.location.columnNumber : 0', content)
+                    content = re.sub(r'column\s*:\s*pageError\s*\.\s*location\s*\.\s*column(?!Number)', 'column: pageError.location ? pageError.location.column : 0', content)
+                    
+                    patched = (content != orig_content)
+                    
                     if patched:
                         with open(p, "w", encoding="utf-8") as f:
                             f.write(content)
