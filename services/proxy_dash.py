@@ -416,7 +416,8 @@ class HLSProxyDashMixin:
                 
                 logger.warning("🔐 Trying direct connection as final fallback for AES key...")
                 try:
-                    async with self.session.get(key_url, headers=headers, ssl=not disable_ssl, allow_redirects=False, timeout=10) as direct_resp:
+                    direct_session = await self._get_session()
+                    async with direct_session.get(key_url, headers=headers, ssl=not disable_ssl, allow_redirects=False, timeout=10) as direct_resp:
                         if direct_resp.status in (200, 206):
                             key_data = await direct_resp.read()
                             return web.Response(

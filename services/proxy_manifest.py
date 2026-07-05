@@ -209,14 +209,18 @@ class HLSProxyManifestHandlerMixin:
 
                 # Fetch original manifest if not already captured
                 if not captured_manifest:
-                    mpd_session, _ = await self._get_proxy_session(
+                    mpd_session, mpd_proxy_used = await self._get_proxy_session(
                         stream_url, bypass_warp=bypass_warp, forced_proxy=selected_proxy
                     )
-                    async with mpd_session.get(stream_url, headers=stream_headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                        if resp.status != 200:
-                            return web.Response(text=f"Failed to fetch original MPD: {resp.status}", status=resp.status)
-                        captured_manifest = await resp.text()
-                        stream_url = str(resp.url)
+                    try:
+                        async with mpd_session.get(stream_url, headers=stream_headers, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                            if resp.status != 200:
+                                return web.Response(text=f"Failed to fetch original MPD: {resp.status}", status=resp.status)
+                            captured_manifest = await resp.text()
+                            stream_url = str(resp.url)
+                    finally:
+                        if mpd_proxy_used:
+                            await mpd_session.close()
 
                 # Encode DASH routing state into base64 token (stateless, no server-side session)
                 from services.proxy_dash import _encode_dash_state
@@ -426,6 +430,7 @@ class HLSProxyManifestHandlerMixin:
                     retries = 2
                     for attempt in range(retries):
                         mpd_proxy = None
+                        mpd_session = None
                         try:
                             # Use helper to get proxy-enabled session
                             mpd_session, mpd_proxy = await self._get_proxy_session(
@@ -491,6 +496,9 @@ class HLSProxyManifestHandlerMixin:
                             if attempt == retries - 1:
                                 return web.Response(text=f"Unexpected error fetching MPD: {e}", status=500)
                             await asyncio.sleep(1)
+                        finally:
+                            if mpd_session and mpd_proxy:
+                                await mpd_session.close()
 
                     if manifest_content is None:
                          return web.Response(text="Failed to fetch MPD manifest after all attempts", status=502)
