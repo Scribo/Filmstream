@@ -166,6 +166,9 @@ class HLSProxyStreamingMixin:
             raise
         except Exception as e:
             raise _ParallelFallback(f"probe error: {e}")
+        finally:
+            if session and not session.closed:
+                await session.close()
 
         if not total or total < _PARALLEL_MIN_SIZE:
             raise _ParallelFallback(f"segment too small ({total})")
@@ -184,14 +187,15 @@ class HLSProxyStreamingMixin:
             s, _ = await self._get_proxy_session(
                 segment_url, bypass_warp=bypass_warp, forced_proxy=forced_proxy
             )
-            async with s.get(
-                yarl.URL(segment_url, encoded=True),
-                headers=h,
-                ssl=not disable_ssl,
-                timeout=ClientTimeout(total=60, connect=10, sock_connect=10, sock_read=60),
-            ) as r:
-                r.raise_for_status()
-                return await r.read()
+            async with s:
+                async with s.get(
+                    yarl.URL(segment_url, encoded=True),
+                    headers=h,
+                    ssl=not disable_ssl,
+                    timeout=ClientTimeout(total=60, connect=10, sock_connect=10, sock_read=60),
+                ) as r:
+                    r.raise_for_status()
+                    return await r.read()
 
         try:
             parts = await asyncio.gather(*[_fetch_part(s, e) for s, e in ranges])
@@ -391,6 +395,7 @@ class HLSProxyStreamingMixin:
         # In forced-direct retry (WARP fallback), ignore proxy query params.
         forced_proxy = None if force_direct else (forced_proxy or request.query.get("proxy") or None)
         request._ps_forced_proxy = forced_proxy
+        session = None
         session_proxy = None
 
         try:
@@ -566,12 +571,7 @@ class HLSProxyStreamingMixin:
             if use_curl_cffi:
                 logger.info(f"🚀 [curl_cffi] Using browser impersonation for: {stream_url}")
                 try:
-                    # Use a pooled curl session if available
-                    session_key = f"curl_{session_proxy or 'direct'}"
-                    if session_key not in self.curl_sessions or self.curl_sessions[session_key] is None:
-                        self.curl_sessions[session_key] = CurlAsyncSession(impersonate="chrome124")
-
-                    curl_s = self.curl_sessions[session_key]
+                    curl_s = CurlAsyncSession(impersonate="chrome124")
                     curl_headers = prepare_curl_headers(stream_url, headers)
 
 
@@ -617,7 +617,7 @@ class HLSProxyStreamingMixin:
                         async def text(self, errors='replace'):
                             content = await self.read()
                             return content.decode('utf-8', errors=errors)
-                        async def close(self): pass # Session is pooled
+                        async def close(self): pass
                         async def __aenter__(self): return self
                         async def __aexit__(self, exc_type, exc_val, exc_tb): pass
 
@@ -665,10 +665,6 @@ class HLSProxyStreamingMixin:
                     dead_duration=120,
                     extractor_key=request.query.get("extractor_key"),
                 )
-                if old_proxy in self.proxy_sessions:
-                    old = self.proxy_sessions.pop(old_proxy, None)
-                    if old and not old.closed:
-                        await old.close()
                 rot_session, rot_proxy = await self._get_proxy_session(
                     stream_url, bypass_warp=True, forced_proxy=None,
                 )
@@ -841,11 +837,6 @@ class HLSProxyStreamingMixin:
                 try:
                     content_bytes = await resp.read()
                 except (ClientPayloadError, ConnectionResetError, OSError) as e:
-                    # Invalida la sessione nel pool prima del retry
-                    if session_proxy and session_proxy in self.proxy_sessions:
-                        stale = self.proxy_sessions.pop(session_proxy, None)
-                        if stale and not stale.closed:
-                            await stale.close()
                     retry_result = await retry_same_segment_after_payload_error(e)
                     if not retry_result:
                         raise
@@ -1088,15 +1079,7 @@ class HLSProxyStreamingMixin:
                     "Stream interrupted while using proxy %s (payload/reset): %r.",
                     active_proxy, e
                 )
-            # ✅ FIX BUFFERING: Only invalidate the proxy session for real connection
-            # errors (ConnectionResetError), NOT for read timeouts (SocketTimeoutError).
-            # Read timeouts on slow proxies are transient and don't mean the session is
-            # broken — recreating it adds ~1-2s reconnection latency that causes buffering.
             is_read_timeout = 'Timeout on reading' in str(e) or 'TimeoutError' in type(e).__name__
-            if not is_read_timeout and session_proxy and session_proxy in self.proxy_sessions:
-                stale = self.proxy_sessions.pop(session_proxy, None)
-                if stale and not stale.closed:
-                    await stale.close()
             logger.info(f"[INFO] Client disconnected from stream: {stream_url} ({str(e)})")
             return web.Response(text="Client disconnected", status=499)
 
@@ -1116,11 +1099,6 @@ class HLSProxyStreamingMixin:
                     active_proxy,
                     extractor_key=request.query.get("extractor_key"),
                 )
-            # Invalida la sessione nel pool per evitare che i retry successivi riusino una connessione rotta
-            if session_proxy and session_proxy in self.proxy_sessions:
-                stale = self.proxy_sessions.pop(session_proxy, None)
-                if stale and not stale.closed:
-                    await stale.close()
             logger.warning(f"⚠️ Connection lost with source: {stream_url} ({str(e)})")
             return web.Response(text=f"Upstream connection lost: {str(e)}", status=502)
 
@@ -1160,6 +1138,9 @@ class HLSProxyStreamingMixin:
                 e,
             )
             return web.Response(text=f"Stream error: {err_msg}", status=500)
+        finally:
+            if session and not session.closed:
+                await session.close()
 
     async def _reextract_and_retry_segment(
         self, request, stream_url, headers, bypass_warp, forced_proxy, force_direct, disable_ssl
@@ -1407,8 +1388,8 @@ class HLSProxyStreamingMixin:
                     fetch_init(), fetch_segment()
                 )
             finally:
-                # Session is pooled/cached, so we don't close it
-                pass
+                if segment_session and not segment_session.closed:
+                    await segment_session.close()
 
             if init_content is None and init_url:
                 logger.error(f"❌ Failed to fetch init segment")

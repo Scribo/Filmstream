@@ -476,11 +476,6 @@ class HLSProxyManifestHandlerMixin:
                                     mpd_proxy,
                                     extractor_key=request.query.get("extractor_key"),
                                 )
-                                # Also clear the cached session for this proxy
-                                if mpd_proxy in self.proxy_sessions:
-                                    logger.info(f"   [MPD] Removing broken proxy session from cache: {mpd_proxy}")
-                                    self.proxy_sessions.pop(mpd_proxy, None)
-
                             # Clear sticky context if it's a proxy error
                             if is_proxy and SELECTED_PROXY_CONTEXT.get() and not STRICT_PROXY_CONTEXT.get():
                                 logger.info("   [MPD] Clearing sticky proxy context due to ProxyError")
@@ -578,6 +573,7 @@ class HLSProxyManifestHandlerMixin:
                 request._extraction_retried = True
                 extraction_url = request.query.get("orig_url") or target_url
                 logger.warning("Proxy died during playlist fetch, re-extracting %s (orig URL: %s)", target_url, extraction_url)
+                extractor2 = None
                 try:
                     extractor2 = await self.get_extractor(extraction_url, combined_headers, bypass_warp=bypass_warp)
                     if not extractor2:
@@ -618,6 +614,18 @@ class HLSProxyManifestHandlerMixin:
                 except Exception as retry_err:
                     logger.error("Re-extraction failed: %s", retry_err)
                     return web.Response(text="Re-extraction failed", status=502)
+                finally:
+                    _ek2 = self._extractor_key_for_instance(extractor2) if extractor2 else None
+                    if _ek2 and _ek2 in self.extractors:
+                        _ext = self.extractors.pop(_ek2, None)
+                        self._extractor_atimes.pop(_ek2, None)
+                        for _sr in [r for r in self._extractor_stream_atimes if r[0] == _ek2]:
+                            self._extractor_stream_atimes.pop(_sr, None)
+                        if _ext and hasattr(_ext, "close"):
+                            try:
+                                await _ext.close()
+                            except Exception:
+                                pass
 
         except Exception as e:
             error_msg = str(e).lower()

@@ -417,10 +417,7 @@ class HLSProxyCoreMixin:
             logging.error(f"❌ Error in dynamic WARP bypass: {e}")
 
     async def _get_proxy_session(self, url: str, bypass_warp: bool = False, forced_proxy: str | None = None):
-        """Get a session with proxy support for the given URL.
-
-        Sessions are cached and reused for the same proxy to improve performance.
-        Unused sessions older than 120s are closed and removed.
+        """Create a fresh session for the given URL.
 
         Returns: (session, proxy_url) tuple
         - session: The aiohttp ClientSession to use
@@ -428,7 +425,6 @@ class HLSProxyCoreMixin:
         """
         await self._check_dynamic_warp_bypass(url)
 
-        # ✅ FIX: Decodifica il proxy se è URL-encoded
         if forced_proxy:
             forced_proxy = urllib.parse.unquote(forced_proxy)
             if forced_proxy.lower() == "off":
@@ -439,46 +435,22 @@ class HLSProxyCoreMixin:
         prefer_default_family = prefer_default_family_for_url(url)
 
         if proxy:
-            async with self._proxy_session_lock:
-                is_warp = "127.0.0.1:1080" in proxy
-                if proxy in self.proxy_sessions:
-                    cached_session = self.proxy_sessions[proxy]
-                    if not cached_session.closed:
-                        if is_warp:
-                            return cached_session, proxy
-                        atime = self._proxy_session_atimes.get(proxy, 0)
-                        if time.time() - atime > 120:
-                            logger.info(f"🧹 Closing idle proxy session: {proxy}")
-                            del self.proxy_sessions[proxy]
-                            await cached_session.close()
-                        else:
-                            self._proxy_session_atimes[proxy] = time.time()
-                            return cached_session, proxy
-                    else:
-                        del self.proxy_sessions[proxy]
+            logger.info(f"[NET] Creating proxy session: {proxy}")
+            try:
+                connector = get_connector_for_proxy(
+                    proxy,
+                    limit=0,
+                    limit_per_host=0,
+                    keepalive_timeout=60,
+                    family=socket.AF_INET,
+                )
+                timeout = ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=30)
+                session = ClientSession(timeout=timeout, connector=connector)
+                return session, proxy
+            except Exception as e:
+                logger.warning(f"Failed to create proxy connector: {e}")
+                raise
 
-                # Create new session and cache it
-                logger.info(f"[NET] Creating proxy session: {proxy}")
-                try:
-                    connector = get_connector_for_proxy(
-                        proxy,
-                        limit=0,
-                        limit_per_host=0,
-                        keepalive_timeout=60,
-                        family=socket.AF_INET,
-                    )
-                    timeout = ClientTimeout(total=None, connect=30, sock_connect=30, sock_read=30)
-                    session = ClientSession(timeout=timeout, connector=connector)
-                    self.proxy_sessions[proxy] = session
-                    self._proxy_session_atimes[proxy] = time.time()
-                    return session, proxy
-                except Exception as e:
-                    logger.warning(
-                        f"⚠️ Failed to create proxy connector: {e}"
-                    )
-                    raise
-
-        # Fallback to shared non-proxy session
         session = await self._get_session(prefer_default_family=prefer_default_family)
         return session, None
 
@@ -626,19 +598,6 @@ class HLSProxyCoreMixin:
                 await self.session.close()
             if self.flex_session and not self.flex_session.closed:
                 await self.flex_session.close()
-
-            # Close all cached proxy sessions
-            for proxy_url, session in list(self.proxy_sessions.items()):
-                if session and not session.closed:
-                    await session.close()
-            self.proxy_sessions.clear()
-            self._proxy_session_atimes.clear()
-
-            # Close all cached curl sessions
-            for session in list(self.curl_sessions.values()):
-                if session:
-                    await session.close()
-            self.curl_sessions.clear()
 
             for extractor in self.extractors.values():
                 if hasattr(extractor, "close"):

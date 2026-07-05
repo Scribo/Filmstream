@@ -339,16 +339,29 @@ class HLSProxyDashMixin:
                             logger.error(f"❌ Key fetch final direct fallback failed: {direct_e}")
 
                         # --- LOGICA DI INVALIDAZIONE AUTOMATICA ---
-                        try:
-                            url_param = request.query.get("original_channel_url")
-                            if url_param:
+                        url_param = request.query.get("original_channel_url")
+                        if url_param:
+                            extractor = None
+                            try:
                                 extractor = await self.get_extractor(url_param, {})
                                 if hasattr(extractor, "invalidate_cache_for_url"):
                                     await extractor.invalidate_cache_for_url(url_param)
-                        except Exception as cache_e:
-                            logger.error(
-                                f"⚠️ Error during automatic cache invalidation: {cache_e}"
-                            )
+                            except Exception as cache_e:
+                                logger.error(
+                                    f"⚠️ Error during automatic cache invalidation: {cache_e}"
+                                )
+                            finally:
+                                _ek = self._extractor_key_for_instance(extractor) if extractor else None
+                                if _ek and _ek in self.extractors:
+                                    _ext = self.extractors.pop(_ek, None)
+                                    self._extractor_atimes.pop(_ek, None)
+                                    for _sr in [r for r in self._extractor_stream_atimes if r[0] == _ek]:
+                                        self._extractor_stream_atimes.pop(_sr, None)
+                                    if _ext and hasattr(_ext, "close"):
+                                        try:
+                                            await _ext.close()
+                                        except Exception:
+                                            pass
                         # --- FINE LOGICA ---
                         return web.Response(
                             text=f"Key fetch failed: {resp.status}", status=resp.status
